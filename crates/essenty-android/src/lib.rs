@@ -16,6 +16,11 @@
 //! `target.'cfg(target_os = "android")'.dependencies` in this crate and must
 //! never leak into the core crates.
 //!
+//! On Android, the optional `native-activity` feature provides
+//! `NativeActivityLifecycle`, which drives the registry while polling an
+//! `android-activity` event loop. No application-written Java is needed for
+//! that host model.
+//!
 //! # Example
 //!
 //! ```rust
@@ -34,12 +39,18 @@ use essenty_back_handler::BackDispatcher;
 use essenty_lifecycle::{LifecycleRegistry, LifecycleState};
 use essenty_state_keeper::StateKeeper;
 
+#[cfg(all(target_os = "android", feature = "native-activity"))]
+mod native_activity;
+
+#[cfg(all(target_os = "android", feature = "native-activity"))]
+pub use native_activity::NativeActivityLifecycle;
+
 /// Forwards Android `Activity` lifecycle callbacks into a [`LifecycleRegistry`].
 ///
 /// Each method is idempotent with respect to its target state: calling
 /// `on_resume` when already resumed is a no-op returning `Ok(())`, which
 /// keeps duplicate platform callbacks harmless. Out-of-order transitions
-/// (e.g. `on_resume` before `on_create`) return a [`LifecycleError`](essenty_lifecycle::LifecycleError).
+/// are walked through intermediate states by the core registry.
 #[derive(Debug, Clone, Default)]
 pub struct AndroidLifecycle {
     registry: LifecycleRegistry,

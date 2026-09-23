@@ -1,15 +1,16 @@
 # Essenty Rust
 
-A cross-platform application lifecycle/state runtime for Rust, inspired by
-[Ark Ivanov's Essenty](https://github.com/arkivanov/Essenty) but designed
-idiomatically for Rust from the ground up.
+Essenty for Rust is a Rust-native port of the Essenty architectural primitives,
+based on the behavior of [Ark Ivanov's Essenty](https://github.com/arkivanov/Essenty).
+Application developers consume it entirely from Rust. Kotlin, Java, Swift,
+Objective-C, and C/C++ wrappers are not required. Platform FFI exists only
+inside platform adapters where operating system APIs require it.
 
-> **Status: early development (`0.1.0` bootstrap).** The pure Rust core
-> (lifecycle, state keeper, instance keeper, back handler) is implemented,
-> tested, and covered by CI. Platform adapters (Android, Apple, Web) exist as
-> documented bootstrap mappings; full FFI/event wiring (JNI, `objc2`
-> observers, browser listeners) is planned follow-up work. A Decompose-like
-> architecture layer will be built on top of this foundation.
+> **Status: early development (`0.1.0`).** The four core primitives are tested.
+> macOS, UIKit, Web, and Rust NativeActivity lifecycle adapters now observe
+> real platform events, with the verification levels and gaps documented in
+> [Android](docs/ANDROID.md), [Apple](docs/APPLE.md), and [Web](docs/WEB.md).
+> AndroidX saved state, retained objects, and predictive back are still planned.
 
 This project is **not** affiliated with the Essenty authors. No Essenty source
 code was copied; only public behavioral concepts (lifecycle states, saved
@@ -34,7 +35,7 @@ Android  Apple      Web
   keeper), `thiserror` (typed errors), and `std` containers used in an
   `alloc`-compatible way. They must never depend on platform crates.
 - **Platform crates are adapters.** They wrap the core for Android, the Apple
-  family, and Web/WASM. Platform SDK/FFI dependencies (when added) stay
+  family, and Web/WASM. Platform SDK/FFI dependencies stay
   behind target-gated dependencies inside the adapter crate.
 - **Capability-oriented, not triple-oriented.** There is one crate per
   platform family — never one crate per CPU architecture. OS differences
@@ -53,37 +54,23 @@ Android  Apple      Web
 | `essenty-state-keeper` | Byte-oriented providers, single-shot restore consumption, deterministic ordered save, pluggable `serde` codecs (no hard-coded JSON) | Implemented + tested |
 | `essenty-instance-keeper` | `Rc`-shared retained objects with deterministic `Drop` cleanup, per-key type checking | Implemented + tested |
 | `essenty-back-handler` | Priority-ordered dispatch, enable/disable, regular + predictive (`start/progress/cancel/invoke`) gesture model with gesture claiming | Implemented + tested |
-| `essenty-android` | `Activity` lifecycle, `SavedStateRegistry`, `OnBackPressedDispatcher`/Predictive Back mappings | Bootstrap adapters + tests; JNI planned |
-| `essenty-apple` | One Apple-family crate (iOS, macOS, watchOS, tvOS, visionOS, Mac Catalyst) with shared implementation | Bootstrap adapters + tests; `objc2` observers planned |
-| `essenty-web` | Visibility → lifecycle, `popstate` → back, storage key namespacing; `wasm32`-only live bindings seam | Bootstrap mappings + tests; listener wiring planned |
+| `essenty-android` | Rust NativeActivity lifecycle and ordinary Back key integration; host-testable mappings | NativeActivity compile-tested; AndroidX and predictive back planned |
+| `essenty-apple` | Application notifications through `objc2` on macOS, iOS, tvOS, visionOS and Catalyst; pure mapping on watchOS | Native observers compile-tested; device tests planned |
+| `essenty-web` | Automatic visibility and page transition observation, opt-in back mapping, storage key namespacing | WASM compile-tested; browser tests planned |
 
-The umbrella `essenty` crate also provides `Runtime`, `PlatformEvent`, and
-`DispatchResult` for one-event-at-a-time host integration. See
+The umbrella `essenty` crate optionally provides `Runtime`, `PlatformEvent`, and
+`DispatchResult` behind the `runtime` feature. None of the four primitives or
+platform adapters requires it. See
 [`docs/FFI_ARCHITECTURE.md`](docs/FFI_ARCHITECTURE.md) for ownership and FFI
 rules, and [`docs/SEMANTIC_COMPATIBILITY.md`](docs/SEMANTIC_COMPATIBILITY.md)
 for the audited upstream behavior and intentional Rust differences.
 
 ## Platforms
 
-Core crates are written against `core`/`alloc`-compatible containers and
-avoid filesystem, networking, and global runtimes, so they build anywhere
-Rust builds. Target triples differ by CPU, but architecture is
-capability-oriented: no crate exists merely because a triple differs.
-
-| Family | Triples (architectural scope) | This milestone |
-|---|---|---|
-| Android | `aarch64-linux-android`, `x86_64-linux-android` | Adapter compiles; `cargo check` in CI with NDK; JNI planned |
-| iOS | `aarch64-apple-ios`, `aarch64-apple-ios-sim` | `cargo check` on macOS CI; `objc2` wiring planned |
-| macOS | `aarch64-apple-darwin`, `x86_64-apple-darwin` | Host-tested on Apple Silicon; x86_64 via `cargo check` |
-| Windows | `x86_64-pc-windows-msvc`, `aarch64-pc-windows-msvc` | `cargo check`/test in CI; no GUI framework forced (future `essenty-winit`, `essenty-tauri`, … crates) |
-| Linux GNU | `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu` | Host-tested + cross-check in CI |
-| Linux musl | `x86_64-unknown-linux-musl`, `aarch64-unknown-linux-musl` | `cargo check` in CI where toolchains allow |
-| Web | `wasm32-unknown-unknown` | `cargo check` in CI; runtime browser wiring planned |
-| watchOS / tvOS / visionOS / Catalyst | `aarch64-apple-watchos[-sim]`, `aarch64-apple-tvos[-sim]`, `aarch64-apple-visionos[-sim]`, `*-ios-macabi` | `cargo check` on macOS CI where SDKs allow; shared Apple implementation |
-
-Labels used below and in CI: **implemented** (real behavior + tests),
-**compile-tested** (`cargo check` only, linking/runtime may need an SDK),
-**planned** (documented seam, no code yet).
+The core remains framework neutral on Linux and Windows. Platform adapters
+are selected at compile time. See [the exact 21-target matrix](docs/TARGETS.md)
+for target-by-target verification. `cargo check` does not establish runtime
+behavior on an emulator, simulator, device, or browser.
 
 ## Quick start
 
@@ -121,7 +108,8 @@ back.register(0, true, |event| println!("back {event:?}"));
 assert!(back.back());
 ```
 
-For a platform host, send a coarse event to one Rust runtime:
+For an application that wants one optional event entry point, enable
+`essenty = { version = "0.1", features = ["runtime"] }`:
 
 ```rust
 use essenty::{PlatformEvent, Runtime, LifecycleState};
@@ -160,6 +148,19 @@ assert_eq!(value, Some(Counter { value: 7 }));
 See [`examples/README.md`](examples/README.md) and
 `crates/essenty/examples/counter.rs` for a runnable end-to-end demo.
 
+On Web, a Rust application can attach lifecycle observation directly:
+
+```rust,ignore
+use essenty_web::wasm::BrowserLifecycle;
+
+let lifecycle = BrowserLifecycle::new()?;
+let _subscription = lifecycle.registry().subscribe(|state| {
+    // Handle the new Essenty lifecycle state in Rust.
+});
+```
+
+See the platform guides for the supported Rust host models and their limits.
+
 ## Build / test / lint
 
 ```bash
@@ -188,10 +189,9 @@ cargo check --workspace --target x86_64-unknown-linux-gnu
   `RefCell`, `FnMut`) where their ownership requires it. Multithreaded hosts
   confine the runtime to one thread or provide a dedicated wrapper;
   `Send`/`Sync` is never imposed without justification.
-- **Typed errors, no panics.** Library code returns `LifecycleError`,
-  `StateKeeperError`, `InstanceKeeperError`, `BackError`; `unwrap`/`expect`
-  appear only in tests. No `unsafe` in this milestone
-  (`unsafe_code = "forbid"` for pure crates).
+- **Localized unsafe.** Pure core crates forbid unsafe code. `objc2`
+  notification registration is confined to Apple adapter modules with
+  documented safety assumptions.
 - **No desktop framework forced.** Core compiles for Windows/Linux today;
   `winit`/`Tauri`/`Slint` adapters can arrive later as separate crates.
 

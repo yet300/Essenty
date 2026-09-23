@@ -1,7 +1,8 @@
-//! Umbrella facade for the Essenty-inspired Rust runtime.
+//! Rust-native Essenty primitives. Each subsystem can be used independently.
 //!
 //! Depending on [`essenty`](self) alone gives access to the four pure Rust
-//! core crates and a small event-driven runtime host.
+//! core crates. An optional event-driven host is available with the `runtime`
+//! feature.
 //!
 //! ```toml
 //! essenty = "0.1"
@@ -49,11 +50,13 @@ pub use essenty_instance_keeper::{InstanceKeeper, InstanceKeeperError};
 pub use essenty_lifecycle::{LifecycleError, LifecycleRegistry, LifecycleState, Subscription};
 pub use essenty_state_keeper::{StateKeeper, StateKeeperError};
 
+#[cfg(feature = "runtime")]
 use std::collections::BTreeMap;
 
 /// Platform-neutral input to an application runtime. Platform adapters
 /// translate native callbacks into one of these coarse events.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg(feature = "runtime")]
 pub enum PlatformEvent {
     /// Drive the root lifecycle; child propagation remains in Rust.
     Lifecycle(LifecycleState),
@@ -74,6 +77,7 @@ pub enum PlatformEvent {
 /// One response to one platform event. The adapter can inspect the result
 /// without calling back into Rust for individual component properties.
 #[derive(Debug, Default, PartialEq, Eq)]
+#[cfg(feature = "runtime")]
 pub struct DispatchResult {
     /// Whether a back action or gesture phase found a handler.
     pub back_handled: Option<bool>,
@@ -85,6 +89,7 @@ pub struct DispatchResult {
 
 /// Failure from one runtime dispatch.
 #[derive(Debug, thiserror::Error)]
+#[cfg(feature = "runtime")]
 pub enum RuntimeError {
     /// Invalid lifecycle transition.
     #[error(transparent)]
@@ -101,6 +106,7 @@ pub enum RuntimeError {
 ///
 /// Rust components receive references to the subsystems during graph setup;
 /// platform bindings retain one runtime handle and dispatch coarse events.
+#[cfg(feature = "runtime")]
 #[derive(Debug, Default)]
 pub struct Runtime {
     lifecycle: LifecycleRegistry,
@@ -109,6 +115,7 @@ pub struct Runtime {
     back_dispatcher: BackDispatcher,
 }
 
+#[cfg(feature = "runtime")]
 impl Runtime {
     /// New runtime with no restored state.
     #[must_use]
@@ -180,7 +187,7 @@ impl Runtime {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "runtime"))]
 mod runtime_tests {
     use super::*;
 

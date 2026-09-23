@@ -10,7 +10,7 @@ env:
 
 jobs:
   macos:
-    name: macOS Apple Silicon (test)
+    name: macOS host (test)
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
@@ -19,6 +19,7 @@ jobs:
           targets: aarch64-apple-darwin
       - uses: rust-lang/rust-cache@v2
       - run: cargo test --workspace
+      - run: cargo run -p essenty-apple --example macos_notifications
 
   apple-checks:
     name: Apple targets (cargo check, compile-tested)
@@ -42,10 +43,9 @@ jobs:
       - uses: rust-lang/rust-cache@v2
       - run: cargo check --workspace --target ${{ matrix.target }}
 
-  apple-best-effort:
-    name: Apple visionOS + Catalyst (cargo check, best-effort)
-    runs-on: macos-14
-    continue-on-error: true
+  apple-newer-sdks:
+    name: Apple visionOS + Catalyst (cargo check, compile-tested)
+    runs-on: macos-15
     strategy:
       fail-fast: false
       matrix:

@@ -5,11 +5,9 @@
 //! genuinely OS-specific behavior gets its own module, gated with
 //! `cfg(target_vendor = "apple")` plus OS checks where required.
 //!
-//! Bootstrap scope: host-compilable, pure Rust adapters over the core
-//! crates. No `objc2` (or other framework) bindings are pulled in yet; the
-//! module layout below reserves the seam where `UIApplication` / `UIScene` /
-//! `NSApplication` lifecycle, Apple state restoration, and gesture
-//! equivalents will be wired in follow-up milestones.
+//! The macOS [`ApplicationLifecycle`] observes `NSApplication` notifications
+//! directly through `objc2`. Other Apple targets currently have manual
+//! mapping only.
 //!
 //! # Example
 //!
@@ -100,46 +98,17 @@ pub mod shared {
     }
 }
 
-/// iOS / Mac Catalyst scene integration.
-///
-/// Mac Catalyst (`aarch64-apple-ios-macabi`, `x86_64-apple-ios-macabi`)
-/// shares `UIKit` scene semantics with iOS, so both targets use this module.
-pub mod ios {
-    /// Marker: iOS scene adapter present (backed by [`super::shared`]).
-    pub const SCENE_SYSTEM: &str = "UIKit.UIScene";
-}
+#[cfg(target_os = "macos")]
+mod macos_native;
 
-/// macOS app integration.
-pub mod macos {
-    /// Marker: macOS app adapter present (backed by [`super::shared`]).
-    pub const APP_SYSTEM: &str = "AppKit.NSApplication";
-}
+#[cfg(target_os = "macos")]
+pub use macos_native::{ApplicationLifecycle, ApplicationLifecycleError};
 
-/// watchOS integration.
-pub mod watchos {
-    /// Marker: watchOS adapter present (backed by [`super::shared`]).
-    pub const SCENE_SYSTEM: &str = "WatchKit.WKApplication";
-}
+#[cfg(any(target_os = "ios", target_os = "tvos", target_os = "visionos"))]
+mod uikit_native;
 
-/// tvOS integration.
-pub mod tvos {
-    /// Marker: tvOS adapter present (backed by [`super::shared`]).
-    pub const SCENE_SYSTEM: &str = "UIKit.UIScene.tvOS";
-}
-
-/// visionOS integration.
-pub mod visionos {
-    /// Marker: visionOS adapter present (backed by [`super::shared`]).
-    pub const SCENE_SYSTEM: &str = "UIKit.UIScene.visionOS";
-}
-
-/// Apple-only extensions, compiled solely on Apple targets.
-///
-/// This module is empty in the bootstrap; it reserves the seam for future
-/// `objc2`-based `UIApplication`/`NSApplication` observers that cannot exist
-/// on other hosts.
-#[cfg(target_vendor = "apple")]
-pub mod apple_os {}
+#[cfg(any(target_os = "ios", target_os = "tvos", target_os = "visionos"))]
+pub use uikit_native::{ApplicationLifecycle, ApplicationLifecycleError};
 
 #[cfg(test)]
 mod tests {
@@ -170,14 +139,5 @@ mod tests {
         assert!(host.registry().state().is_resumed());
         host.scene_will_resign_active();
         assert_eq!(host.registry().state(), LifecycleState::Started);
-    }
-
-    #[test]
-    fn os_markers_exist() {
-        assert!(!ios::SCENE_SYSTEM.is_empty());
-        assert!(!macos::APP_SYSTEM.is_empty());
-        assert!(!watchos::SCENE_SYSTEM.is_empty());
-        assert!(!tvos::SCENE_SYSTEM.is_empty());
-        assert!(!visionos::SCENE_SYSTEM.is_empty());
     }
 }

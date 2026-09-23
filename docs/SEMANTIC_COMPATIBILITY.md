@@ -70,6 +70,17 @@ Upstream references: [dispatcher](https://github.com/arkivanov/Essenty/blob/c4f1
 | Nested back dispatch and callback replacement during cancellation | TODO | The command queue prevents aliasing, but deeply nested behavior has not been exhaustively compared to upstream. |
 | Nested dispatcher composition | TODO | No parent/child back dispatcher abstraction exists yet. A component runtime should define propagation and ownership before introducing one. |
 
+## Platform integration status
+
+| Behavior | Status | Rust evidence / decision |
+|---|---|---|
+| Android `Activity` lifecycle to core lifecycle | TODO | `NativeActivityLifecycle` now observes the `android-activity` Rust host event loop; arbitrary AndroidX `LifecycleOwner` binding is not implemented. Cross-compiled only. |
+| Android saved state and retained objects | TODO | `AndroidStateHost` maps core values but is not attached to `SavedStateRegistry` or `ViewModelStore`. No runtime equivalence claim. |
+| Android ordinary/predictive back | TODO | NativeActivity Back key dispatch is wired; AndroidX callback priority and predictive progress are not yet wired. |
+| Apple application lifecycle | INTENTIONALLY DIFFERENT | macOS and UIKit adapters observe process-wide notifications with `objc2`; they do not model individual scenes. macOS synthetic notification delivery and observer removal were runtime-tested; UIKit was compile-tested only. watchOS has no native observer yet. |
+| Browser lifecycle | INTENTIONALLY DIFFERENT | Visibility and `pagehide`/`pageshow` listeners are wired. A persisted `pagehide` leaves the registry restorable; `persisted_page_hide_preserves_lifecycle_for_bfcache` covers the mapping. Browser delivery remains untested. |
+| Browser back | NOT APPLICABLE | `popstate` occurs after history navigation and cannot cancel it. The bridge is explicit and does not claim upstream Android back semantics. |
+
 ## Threading, allocation and portability
 
 | Type | Thread property | Main allocations | Portability |

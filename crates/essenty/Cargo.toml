@@ -10,12 +10,18 @@ description = "Cross-platform application lifecycle/state runtime (Essenty-inspi
 categories.workspace = true
 keywords.workspace = true
 
+[features]
+default = []
+# A convenience host for applications that want one event entry point.
+# The four primitives remain independent and require no runtime.
+runtime = ["dep:thiserror"]
+
 [dependencies]
 essenty-lifecycle = { workspace = true }
 essenty-state-keeper = { workspace = true }
 essenty-instance-keeper = { workspace = true }
 essenty-back-handler = { workspace = true }
-thiserror = { workspace = true }
+thiserror = { workspace = true, optional = true }
 
 [lints]
 workspace = true

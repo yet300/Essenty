@@ -38,3 +38,14 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: rust-lang/rust-cache@v2
       - run: cargo test --workspace --all-features
+
+  docs:
+    name: docs (deny warnings)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: rust-lang/rust-cache@v2
+      - run: cargo doc --workspace --no-deps
+        env:
+          RUSTDOCFLAGS: -D warnings

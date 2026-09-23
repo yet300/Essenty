@@ -5,16 +5,14 @@
 //! `web-sys`) are used exclusively inside this crate and never leak into the
 //! core crates.
 //!
-//! Planned integrations:
+//! Integration surfaces:
 //!
 //! - Page Visibility API → lifecycle ([`VisibilityLifecycle`])
 //! - History API / `popstate` → back handling ([`HistoryBackBridge`])
 //! - `sessionStorage` / `localStorage` → state persistence ([`StorageKey`])
 //!
-//! Only the mapping logic is implemented here; live browser event wiring
-//! (listeners installed via `wasm-bindgen` closures) arrives in a follow-up
-//! milestone. Everything in this crate compiles and is unit-tested on the
-//! host; `wasm32`-only helpers are gated with `cfg(target_arch = "wasm32")`.
+//! `wasm::BrowserLifecycle` installs live browser lifecycle listeners on
+//! `wasm32`. Mapping logic remains host-testable.
 //!
 //! # Example
 //!
@@ -57,8 +55,8 @@ impl PageVisibility {
 /// Forwards Page Visibility changes into a [`LifecycleRegistry`].
 ///
 /// Mapping: `visible` → `Resumed` (via `Created`/`Started` intermediates),
-/// anything else → `Created` (backgrounded but restorable). Disconnect maps
-/// to `destroy` (page hide with `persisted = false` plus `pagehide`).
+/// anything else → `Created` (backgrounded but restorable). Non-persisted
+/// page hide destroys the registry; back/forward-cache pages remain restorable.
 #[derive(Debug, Clone, Default)]
 pub struct VisibilityLifecycle {
     registry: LifecycleRegistry,
@@ -98,16 +96,24 @@ impl VisibilityLifecycle {
 
     /// Handles page termination (`pagehide` without persistence).
     pub fn on_page_hide(&self) {
-        let _ = self.registry.destroy();
+        self.on_page_hide_with_persistence(false);
+    }
+
+    /// Handles `pagehide`. A persisted page remains eligible for the browser
+    /// back/forward cache and can become visible again on `pageshow`.
+    pub fn on_page_hide_with_persistence(&self, persisted: bool) {
+        if persisted {
+            let _ = self.registry.move_to(LifecycleState::Created);
+        } else {
+            let _ = self.registry.destroy();
+        }
     }
 }
 
 /// Forwards History API `popstate` events into a core [`BackDispatcher`].
 ///
-/// Returns `true` when a registered handler consumed the back navigation
-/// (the host should then `preventDefault`-equivalent handling, i.e. not pop
-/// further); `false` means no handler claimed it and default history
-/// behavior should proceed.
+/// `popstate` fires after the active history entry changes. Returning `true`
+/// means a Rust callback ran; it cannot cancel browser navigation.
 #[derive(Debug, Default)]
 pub struct HistoryBackBridge {
     dispatcher: BackDispatcher,
@@ -181,13 +187,148 @@ impl StorageKey {
 
 /// `wasm32`-only live browser bindings.
 ///
-/// Kept minimal in the bootstrap: reading `document.visibilityState`.
-/// Listener installation (`visibilitychange`, `popstate`) and storage access
-/// arrive with the follow-up WASM integration milestone.
+/// Live browser lifecycle binding and small DOM helpers.
 #[cfg(target_arch = "wasm32")]
 pub mod wasm {
-    use wasm_bindgen::{JsCast, JsValue};
-    use web_sys::window;
+    use super::VisibilityLifecycle;
+    use wasm_bindgen::{JsCast, JsValue, closure::Closure};
+    use web_sys::{Document, Event, Window, window};
+
+    /// Error attaching browser event listeners.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum BrowserError {
+        /// No window or document is available.
+        Unavailable,
+        /// A listener could not be installed.
+        Listener,
+    }
+
+    impl std::fmt::Display for BrowserError {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            match self {
+                Self::Unavailable => f.write_str("browser window or document unavailable"),
+                Self::Listener => f.write_str("browser event listener registration failed"),
+            }
+        }
+    }
+
+    impl std::error::Error for BrowserError {}
+
+    fn read_visibility(document: &Document) -> Option<String> {
+        js_sys::Reflect::get(document, &JsValue::from_str("visibilityState")).ok()?.as_string()
+    }
+
+    /// Observes browser visibility and page transitions until dropped.
+    pub struct BrowserLifecycle {
+        lifecycle: VisibilityLifecycle,
+        document: Document,
+        window: Window,
+        visibility: Closure<dyn FnMut(Event)>,
+        page_hide: Closure<dyn FnMut(Event)>,
+        page_show: Closure<dyn FnMut(Event)>,
+    }
+
+    impl std::fmt::Debug for BrowserLifecycle {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.debug_struct("BrowserLifecycle")
+                .field("state", &self.lifecycle.registry().state())
+                .finish_non_exhaustive()
+        }
+    }
+
+    impl BrowserLifecycle {
+        /// Attaches to the current document and reads its initial visibility.
+        ///
+        /// # Errors
+        /// Returns an error if the DOM is unavailable or listener setup fails.
+        pub fn new() -> Result<Self, BrowserError> {
+            let window = window().ok_or(BrowserError::Unavailable)?;
+            let document = window.document().ok_or(BrowserError::Unavailable)?;
+            let lifecycle = VisibilityLifecycle::new();
+            if let Some(state) = read_visibility(&document) {
+                lifecycle.on_visibility_str(&state);
+            }
+
+            let document_for_visibility = document.clone();
+            let visibility_lifecycle = lifecycle.clone();
+            let visibility = Closure::<dyn FnMut(Event)>::new(move |_| {
+                if let Some(state) = read_visibility(&document_for_visibility) {
+                    visibility_lifecycle.on_visibility_str(&state);
+                }
+            });
+            document
+                .add_event_listener_with_callback(
+                    "visibilitychange",
+                    visibility.as_ref().unchecked_ref(),
+                )
+                .map_err(|_| BrowserError::Listener)?;
+
+            let hide_lifecycle = lifecycle.clone();
+            let page_hide = Closure::<dyn FnMut(Event)>::new(move |event: Event| {
+                let persisted = event
+                    .dyn_ref::<web_sys::PageTransitionEvent>()
+                    .is_some_and(web_sys::PageTransitionEvent::persisted);
+                hide_lifecycle.on_page_hide_with_persistence(persisted);
+            });
+            if window
+                .add_event_listener_with_callback("pagehide", page_hide.as_ref().unchecked_ref())
+                .is_err()
+            {
+                let _ = document.remove_event_listener_with_callback(
+                    "visibilitychange",
+                    visibility.as_ref().unchecked_ref(),
+                );
+                return Err(BrowserError::Listener);
+            }
+
+            let show_lifecycle = lifecycle.clone();
+            let document_for_show = document.clone();
+            let page_show = Closure::<dyn FnMut(Event)>::new(move |_| {
+                if let Some(state) = read_visibility(&document_for_show) {
+                    show_lifecycle.on_visibility_str(&state);
+                }
+            });
+            if window
+                .add_event_listener_with_callback("pageshow", page_show.as_ref().unchecked_ref())
+                .is_err()
+            {
+                let _ = document.remove_event_listener_with_callback(
+                    "visibilitychange",
+                    visibility.as_ref().unchecked_ref(),
+                );
+                let _ = window.remove_event_listener_with_callback(
+                    "pagehide",
+                    page_hide.as_ref().unchecked_ref(),
+                );
+                return Err(BrowserError::Listener);
+            }
+
+            Ok(Self { lifecycle, document, window, visibility, page_hide, page_show })
+        }
+
+        /// The shared Rust lifecycle registry.
+        #[must_use]
+        pub fn registry(&self) -> &essenty_lifecycle::LifecycleRegistry {
+            self.lifecycle.registry()
+        }
+    }
+
+    impl Drop for BrowserLifecycle {
+        fn drop(&mut self) {
+            let _ = self.document.remove_event_listener_with_callback(
+                "visibilitychange",
+                self.visibility.as_ref().unchecked_ref(),
+            );
+            let _ = self.window.remove_event_listener_with_callback(
+                "pagehide",
+                self.page_hide.as_ref().unchecked_ref(),
+            );
+            let _ = self.window.remove_event_listener_with_callback(
+                "pageshow",
+                self.page_show.as_ref().unchecked_ref(),
+            );
+        }
+    }
 
     /// Reads `document.visibilityState` from the live DOM.
     /// Returns `None` when no window/document is available.
@@ -197,9 +338,7 @@ pub mod wasm {
     /// [`crate::PageVisibility::parse`] inputs exactly.
     #[must_use]
     pub fn current_visibility_state() -> Option<String> {
-        let document = window()?.document()?;
-        let key = JsValue::from_str("visibilityState");
-        js_sys::Reflect::get(&JsValue::from(document), &key).ok()?.as_string()
+        read_visibility(&window()?.document()?)
     }
 
     /// Returns `true` when running inside a browser window.
@@ -230,6 +369,16 @@ mod tests {
         assert_eq!(host.registry().state(), LifecycleState::Created);
         host.on_page_hide();
         assert!(host.registry().state().is_destroyed());
+    }
+
+    #[test]
+    fn persisted_page_hide_preserves_lifecycle_for_bfcache() {
+        let host = VisibilityLifecycle::new();
+        host.on_visibility_str("visible");
+        host.on_page_hide_with_persistence(true);
+        assert_eq!(host.registry().state(), LifecycleState::Created);
+        host.on_visibility_str("visible");
+        assert_eq!(host.registry().state(), LifecycleState::Resumed);
     }
 
     #[test]
