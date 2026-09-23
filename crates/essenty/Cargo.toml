@@ -1,0 +1,20 @@
+[package]
+name = "essenty"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Cross-platform application lifecycle/state runtime (Essenty-inspired, Rust-native)."
+categories.workspace = true
+keywords.workspace = true
+
+[dependencies]
+essenty-lifecycle = { workspace = true }
+essenty-state-keeper = { workspace = true }
+essenty-instance-keeper = { workspace = true }
+essenty-back-handler = { workspace = true }
+
+[lints]
+workspace = true

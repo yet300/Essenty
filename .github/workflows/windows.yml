@@ -1,0 +1,32 @@
+name: Windows
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  windows-x64-msvc:
+    name: Windows x64 MSVC (test)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+      - uses: rust-lang/rust-cache@v2
+      - run: cargo test --workspace --target x86_64-pc-windows-msvc
+
+  windows-arm64-check:
+    name: Windows ARM64 (cargo check, compile-tested)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-pc-windows-msvc
+      - uses: rust-lang/rust-cache@v2
+      - run: cargo check --workspace --target aarch64-pc-windows-msvc

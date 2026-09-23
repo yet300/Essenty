@@ -1,0 +1,27 @@
+name: Android
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  android-checks:
+    name: Android (cargo check, compile-tested)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [aarch64-linux-android, x86_64-linux-android]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: rust-lang/rust-cache@v2
+      # `cargo check` needs only the target std, not the NDK linker.
+      # Device/emulator testing arrives with the JNI milestone.
+      - run: cargo check --workspace --target ${{ matrix.target }}

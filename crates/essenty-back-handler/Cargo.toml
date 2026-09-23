@@ -1,0 +1,17 @@
+[package]
+name = "essenty-back-handler"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Pure Rust back-event dispatcher with predictive gesture support."
+categories.workspace = true
+keywords.workspace = true
+
+[dependencies]
+thiserror = { workspace = true }
+
+[lints]
+workspace = true

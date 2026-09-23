@@ -1,0 +1,63 @@
+name: Apple
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  macos:
+    name: macOS Apple Silicon (test)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+      - uses: rust-lang/rust-cache@v2
+      - run: cargo test --workspace
+
+  apple-checks:
+    name: Apple targets (cargo check, compile-tested)
+    runs-on: macos-14
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-apple-darwin
+          - target: aarch64-apple-ios
+          - target: aarch64-apple-ios-sim
+          - target: aarch64-apple-watchos
+          - target: aarch64-apple-watchos-sim
+          - target: aarch64-apple-tvos
+          - target: aarch64-apple-tvos-sim
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: rust-lang/rust-cache@v2
+      - run: cargo check --workspace --target ${{ matrix.target }}
+
+  apple-best-effort:
+    name: Apple visionOS + Catalyst (cargo check, best-effort)
+    runs-on: macos-14
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - aarch64-apple-visionos
+          - aarch64-apple-visionos-sim
+          - aarch64-apple-ios-macabi
+          - x86_64-apple-ios-macabi
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: rust-lang/rust-cache@v2
+      - run: cargo check --workspace --target ${{ matrix.target }}

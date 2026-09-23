@@ -1,0 +1,19 @@
+[package]
+name = "essenty-lifecycle"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Pure Rust lifecycle abstraction: states, validated transitions, and RAII subscriptions."
+categories.workspace = true
+keywords.workspace = true
+
+[dependencies]
+thiserror = { workspace = true }
+
+[dev-dependencies]
+
+[lints]
+workspace = true

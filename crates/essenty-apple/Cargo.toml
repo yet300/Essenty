@@ -1,0 +1,24 @@
+[package]
+name = "essenty-apple"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Apple-family adapter for the Essenty Rust runtime (iOS, macOS, watchOS, tvOS, visionOS, Mac Catalyst)."
+categories.workspace = true
+keywords.workspace = true
+
+[dependencies]
+essenty-lifecycle = { workspace = true }
+essenty-state-keeper = { workspace = true }
+essenty-back-handler = { workspace = true }
+
+# Future Apple framework bindings (likely the `objc2` ecosystem) belong
+# behind `cfg(target_vendor = "apple")` gates here — never in core crates.
+# Nothing platform-specific is needed for this bootstrap milestone.
+[target.'cfg(target_vendor = "apple")'.dependencies]
+
+[lints]
+workspace = true

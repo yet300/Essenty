@@ -1,0 +1,21 @@
+[package]
+name = "essenty-state-keeper"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Pure Rust state preservation: byte-oriented providers with pluggable serde codecs."
+categories.workspace = true
+keywords.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+serde_json = "1"
+
+[lints]
+workspace = true

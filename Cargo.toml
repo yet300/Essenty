@@ -1,0 +1,61 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/essenty",
+    "crates/essenty-lifecycle",
+    "crates/essenty-state-keeper",
+    "crates/essenty-instance-keeper",
+    "crates/essenty-back-handler",
+    "crates/essenty-android",
+    "crates/essenty-apple",
+    "crates/essenty-web",
+]
+default-members = [
+    "crates/essenty",
+    "crates/essenty-lifecycle",
+    "crates/essenty-state-keeper",
+    "crates/essenty-instance-keeper",
+    "crates/essenty-back-handler",
+    "crates/essenty-android",
+    "crates/essenty-apple",
+    "crates/essenty-web",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "Apache-2.0"
+repository = "https://github.com/yet300/Essenty"
+homepage = "https://github.com/yet300/Essenty"
+authors = ["Essenty Rust Contributors"]
+categories = ["development-tools", "gui"]
+keywords = ["lifecycle", "state", "navigation", "cross-platform", "essenty"]
+
+[workspace.dependencies]
+serde = { version = "1", default-features = false, features = ["derive", "alloc"] }
+thiserror = { version = "2" }
+
+essenty-lifecycle = { path = "crates/essenty-lifecycle", version = "0.1.0" }
+essenty-state-keeper = { path = "crates/essenty-state-keeper", version = "0.1.0" }
+essenty-instance-keeper = { path = "crates/essenty-instance-keeper", version = "0.1.0" }
+essenty-back-handler = { path = "crates/essenty-back-handler", version = "0.1.0" }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
+rust_2018_idioms = { level = "warn", priority = -1 }
+
+[workspace.lints.clippy]
+all = "warn"
+pedantic = "warn"
+missing_errors_doc = "warn"
+missing_panics_doc = "warn"
+
+[profile.dev]
+opt-level = 0
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 16

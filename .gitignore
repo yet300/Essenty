@@ -1,0 +1,35 @@
+# Generated files
+/target/
+**/target/
+
+# Cargo lock is kept for workspace applications/tests but libraries conventionally
+# commit it for reproducible CI. We keep it.
+# Cargo.lock
+
+# Build artifacts
+**/*.rs.bk
+*.pdb
+
+# Editors / IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# direnv / env
+.envrc
+.env
+
+# Coverage
+lcov.info
+coverage/
+tarpaulin-report.html
+
+# Node (only relevant for potential wasm tooling examples)
+node_modules/
+dist/
+pkg/
