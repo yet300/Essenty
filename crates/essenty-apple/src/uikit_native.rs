@@ -1,5 +1,7 @@
 //! `UIKit` application notifications for iOS, tvOS, visionOS and Catalyst.
 
+use crate::ApplicationLifecycleError;
+use crate::notification::register_notifications;
 use essenty_lifecycle::{LifecycleRegistry, LifecycleState};
 use objc2::rc::Retained;
 use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send, sel};
@@ -68,21 +70,6 @@ impl LifecycleObserver {
     }
 }
 
-/// Failure to attach a `UIKit` application observer.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ApplicationLifecycleError {
-    /// `UIKit` application notifications must be observed from the main thread.
-    NotMainThread,
-}
-
-impl std::fmt::Display for ApplicationLifecycleError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("application lifecycle must be created on the main thread")
-    }
-}
-
-impl std::error::Error for ApplicationLifecycleError {}
-
 /// Observes process-wide `UIKit` application notifications until dropped.
 ///
 /// This is an application lifecycle, not an individual `UIScene` lifecycle.
@@ -102,45 +89,23 @@ impl ApplicationLifecycle {
         let observer = LifecycleObserver::new(mtm);
         let center = NSNotificationCenter::defaultCenter();
 
-        // SAFETY: The selectors below exist with NSNotification parameters.
-        // UIKit posts application notifications on the main thread. Drop
-        // unregisters the observer before releasing it.
+        // SAFETY: The observer implements each listed selector with an
+        // NSNotification argument and is unregistered before release.
         unsafe {
-            center.addObserver_selector_name_object(
+            register_notifications(
+                &center,
                 &observer,
-                sel!(essentyDidFinishLaunching:),
-                Some(UIApplicationDidFinishLaunchingNotification),
-                None,
-            );
-            center.addObserver_selector_name_object(
-                &observer,
-                sel!(essentyWillEnterForeground:),
-                Some(UIApplicationWillEnterForegroundNotification),
-                None,
-            );
-            center.addObserver_selector_name_object(
-                &observer,
-                sel!(essentyDidBecomeActive:),
-                Some(UIApplicationDidBecomeActiveNotification),
-                None,
-            );
-            center.addObserver_selector_name_object(
-                &observer,
-                sel!(essentyWillResignActive:),
-                Some(UIApplicationWillResignActiveNotification),
-                None,
-            );
-            center.addObserver_selector_name_object(
-                &observer,
-                sel!(essentyDidEnterBackground:),
-                Some(UIApplicationDidEnterBackgroundNotification),
-                None,
-            );
-            center.addObserver_selector_name_object(
-                &observer,
-                sel!(essentyWillTerminate:),
-                Some(UIApplicationWillTerminateNotification),
-                None,
+                &[
+                    (sel!(essentyDidFinishLaunching:), UIApplicationDidFinishLaunchingNotification),
+                    (
+                        sel!(essentyWillEnterForeground:),
+                        UIApplicationWillEnterForegroundNotification,
+                    ),
+                    (sel!(essentyDidBecomeActive:), UIApplicationDidBecomeActiveNotification),
+                    (sel!(essentyWillResignActive:), UIApplicationWillResignActiveNotification),
+                    (sel!(essentyDidEnterBackground:), UIApplicationDidEnterBackgroundNotification),
+                    (sel!(essentyWillTerminate:), UIApplicationWillTerminateNotification),
+                ],
             );
         }
 

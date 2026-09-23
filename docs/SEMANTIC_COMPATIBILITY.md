@@ -75,11 +75,12 @@ Upstream references: [dispatcher](https://github.com/arkivanov/Essenty/blob/c4f1
 | Behavior | Status | Rust evidence / decision |
 |---|---|---|
 | Android `Activity` lifecycle to core lifecycle | TODO | `NativeActivityLifecycle` now observes the `android-activity` Rust host event loop; arbitrary AndroidX `LifecycleOwner` binding is not implemented. Cross-compiled only. |
-| Android saved state and retained objects | TODO | `AndroidStateHost` maps core values but is not attached to `SavedStateRegistry` or `ViewModelStore`. No runtime equivalence claim. |
+| Android saved state and retained objects | TODO | `NativeActivityState` restores and saves a versioned byte container through `android-activity`'s `StateLoader` and `StateSaver`. `AndroidStateHost` remains a mapping helper; AndroidX `SavedStateRegistry` and `ViewModelStore` are not attached. No AndroidX equivalence claim. |
 | Android ordinary/predictive back | TODO | NativeActivity Back key dispatch is wired; AndroidX callback priority and predictive progress are not yet wired. |
-| Apple application lifecycle | INTENTIONALLY DIFFERENT | macOS and UIKit adapters observe process-wide notifications with `objc2`; they do not model individual scenes. macOS synthetic notification delivery and observer removal were runtime-tested; UIKit was compile-tested only. watchOS has no native observer yet. |
+| Apple application lifecycle | INTENTIONALLY DIFFERENT | macOS, UIKit and WatchKit adapters observe process-wide notifications with `objc2`; they do not model individual scenes. macOS synthetic notification delivery and observer removal were runtime-tested; UIKit and WatchKit were compile-tested only. |
 | Browser lifecycle | INTENTIONALLY DIFFERENT | Visibility and `pagehide`/`pageshow` listeners are wired. A persisted `pagehide` leaves the registry restorable; `persisted_page_hide_preserves_lifecycle_for_bfcache` covers the mapping. Browser delivery remains untested. |
-| Browser back | NOT APPLICABLE | `popstate` occurs after history navigation and cannot cancel it. The bridge is explicit and does not claim upstream Android back semantics. |
+| Browser back | NOT APPLICABLE | The opt-in `BrowserHistoryBack` listener forwards `popstate` after history navigation and cannot cancel it. It does not claim upstream Android back semantics. |
+| Browser persistence | INTENTIONALLY DIFFERENT | Opt-in `BrowserStorage` stores opaque bytes as namespaced hex entries in session or local storage. Saves are not transactional; malformed entries return a typed error. Browser delivery remains untested. |
 
 ## Threading, allocation and portability
 

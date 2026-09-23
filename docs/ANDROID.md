@@ -48,19 +48,48 @@ The host-testable `AndroidLifecycle`, `AndroidStateHost`, and
 `AndroidBackBridge` remain mapping helpers. They do **not** automatically
 connect to Android framework or AndroidX owners.
 
+`NativeActivityState` connects the core state keeper to the
+`android-activity` NativeActivity host. Create it from the `Resume` event's
+`StateLoader`, register providers and consume restored entries through
+`keeper_mut()`, then call `save_bytes()` and pass those bytes to the
+`SaveState` event's `StateSaver`. The versioned container stores each key's
+opaque bytes without imposing a serialization format. Corrupt containers
+return `NativeStateError` rather than silently dropping restored state.
+
+```rust,ignore
+use android_activity::{MainEvent, PollEvent};
+use essenty_android::NativeActivityState;
+
+let mut state = None;
+let mut snapshot = Vec::new();
+host.poll_events(None, |event| match event {
+    PollEvent::Main(MainEvent::Resume { loader, .. }) => {
+        if state.is_none() {
+            state = Some(NativeActivityState::from_loader(&loader).unwrap());
+        }
+    }
+    PollEvent::Main(MainEvent::SaveState { saver, .. }) => {
+        snapshot = state.as_ref().unwrap().save_bytes().unwrap();
+        NativeActivityState::store(&saver, &snapshot);
+    }
+    _ => {}
+});
+```
+
 ## Verified
 
 - Core and mapping helper unit tests: macOS host test run.
 - `NativeActivityLifecycle`: `cargo check` for `aarch64-linux-android`
   and `x86_64-linux-android`.
+- NativeActivity state container: host round-trip and corruption tests,
+  Android target compilation.
 - Emulator/device runtime: not tested.
 
 ## Planned
 
 - A Rust-facing adapter for arbitrary AndroidX `LifecycleOwner`,
   `SavedStateRegistryOwner`, and `ViewModelStoreOwner` environments.
-- Automatic saved-state restoration and configuration-change retention for
-  the Android host, preserving core byte format independence.
+- AndroidX `SavedStateRegistryOwner` and `ViewModelStoreOwner` attachment.
 - AndroidX `OnBackPressedDispatcher` registration, enabled-state observation,
   and predictive-back start/progress/cancel/commit. The current Back key path
   has no predictive progress.

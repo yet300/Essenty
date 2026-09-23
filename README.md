@@ -54,9 +54,9 @@ Android  Apple      Web
 | `essenty-state-keeper` | Byte-oriented providers, single-shot restore consumption, deterministic ordered save, pluggable `serde` codecs (no hard-coded JSON) | Implemented + tested |
 | `essenty-instance-keeper` | `Rc`-shared retained objects with deterministic `Drop` cleanup, per-key type checking | Implemented + tested |
 | `essenty-back-handler` | Priority-ordered dispatch, enable/disable, regular + predictive (`start/progress/cancel/invoke`) gesture model with gesture claiming | Implemented + tested |
-| `essenty-android` | Rust NativeActivity lifecycle and ordinary Back key integration; host-testable mappings | NativeActivity compile-tested; AndroidX and predictive back planned |
-| `essenty-apple` | Application notifications through `objc2` on macOS, iOS, tvOS, visionOS and Catalyst; pure mapping on watchOS | Native observers compile-tested; device tests planned |
-| `essenty-web` | Automatic visibility and page transition observation, opt-in back mapping, storage key namespacing | WASM compile-tested; browser tests planned |
+| `essenty-android` | Rust NativeActivity lifecycle, ordinary Back key and saved-state byte bridge; host-testable mappings | NativeActivity compile-tested; AndroidX and predictive back planned |
+| `essenty-apple` | Application notifications through `objc2` on macOS, iOS, tvOS, visionOS, Catalyst, and watchOS | Native observers compile-tested; device tests planned |
+| `essenty-web` | Automatic visibility and page transition observation; opt-in `popstate` listener and browser storage persistence | WASM compile-tested; browser tests planned |
 
 The umbrella `essenty` crate optionally provides `Runtime`, `PlatformEvent`, and
 `DispatchResult` behind the `runtime` feature. None of the four primitives or

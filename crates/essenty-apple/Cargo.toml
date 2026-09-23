@@ -25,6 +25,10 @@ objc2 = "0.6.4"
 objc2-foundation = { version = "0.3.2", features = ["NSNotification", "NSString"] }
 objc2-ui-kit = { version = "0.3.2", features = ["UIApplication", "UIResponder"] }
 
+[target.'cfg(target_os = "watchos")'.dependencies]
+objc2 = "0.6.4"
+objc2-foundation = { version = "0.3.2", features = ["NSNotification", "NSString"] }
+
 [lints.rust]
 # Objective-C notification registration requires localized unsafe calls.
 unsafe_code = "allow"
