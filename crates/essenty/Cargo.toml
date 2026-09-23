@@ -15,6 +15,7 @@ essenty-lifecycle = { workspace = true }
 essenty-state-keeper = { workspace = true }
 essenty-instance-keeper = { workspace = true }
 essenty-back-handler = { workspace = true }
+thiserror = { workspace = true }
 
 [lints]
 workspace = true

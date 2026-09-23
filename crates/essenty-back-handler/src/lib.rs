@@ -11,7 +11,8 @@
 //!   winner; [`BackDispatcher::predictive_progress`],
 //!   [`BackDispatcher::predictive_cancel`], and
 //!   [`BackDispatcher::predictive_invoke`] route to that claimed handler so
-//!   the gesture stays coherent even if priorities change mid-gesture
+//!   the gesture stays coherent even if priorities change mid-gesture;
+//!   removal cancels the owner and lets a later progress event claim a fallback
 //!
 //! No Android (or any platform) API appears here; platform crates forward
 //! native back events into this dispatcher.
@@ -117,11 +118,55 @@ impl BackHandle {
     }
 }
 
-type Callback = Box<dyn FnMut(BackEvent)>;
+type Callback = Box<dyn FnMut(BackEvent, &mut BackCommands<'_>)>;
+
+enum BackCommand {
+    Register(u64, i32, bool, Callback),
+    Unregister(u64),
+    SetEnabled(u64, bool),
+}
+
+/// Changes requested by a callback while an event is being delivered.
+/// They take effect immediately after that callback returns, avoiding a
+/// mutable alias of the dispatcher during callback execution.
+pub struct BackCommands<'a> {
+    next_id: &'a mut u64,
+    pending: Vec<BackCommand>,
+}
+
+impl std::fmt::Debug for BackCommands<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BackCommands").field("pending_count", &self.pending.len()).finish()
+    }
+}
+
+impl BackCommands<'_> {
+    /// Queues a new handler and returns its id.
+    pub fn register(
+        &mut self,
+        priority: i32,
+        enabled: bool,
+        callback: impl FnMut(BackEvent, &mut BackCommands<'_>) + 'static,
+    ) -> BackHandle {
+        let id = *self.next_id;
+        *self.next_id += 1;
+        self.pending.push(BackCommand::Register(id, priority, enabled, Box::new(callback)));
+        BackHandle { id }
+    }
+
+    /// Queues removal of a handler, including the currently executing one.
+    pub fn unregister(&mut self, id: u64) {
+        self.pending.push(BackCommand::Unregister(id));
+    }
+
+    /// Queues an enabled-state change.
+    pub fn set_enabled(&mut self, id: u64, enabled: bool) {
+        self.pending.push(BackCommand::SetEnabled(id, enabled));
+    }
+}
 
 struct Entry {
     priority: i32,
-    sequence: u64,
     enabled: bool,
     callback: Callback,
 }
@@ -129,7 +174,7 @@ struct Entry {
 /// Back-event dispatcher.
 ///
 /// Registration order plus priority decide the winner: the enabled callback
-/// with the highest `(priority, sequence)` pair handles the event. A
+/// with the highest `(priority, registration id)` pair handles the event. A
 /// predictive gesture is claimed at
 /// [`BackDispatcher::predictive_start`] time and subsequent gesture events
 /// route to the claimed handler.
@@ -137,8 +182,8 @@ struct Entry {
 pub struct BackDispatcher {
     entries: BTreeMap<u64, Entry>,
     next_id: u64,
-    sequence: u64,
     active_gesture: Option<u64>,
+    gesture_in_flight: bool,
 }
 
 impl std::fmt::Debug for BackDispatcher {
@@ -173,7 +218,7 @@ impl BackDispatcher {
     /// Returns `true` while a predictive gesture is in flight.
     #[must_use]
     pub fn has_active_gesture(&self) -> bool {
-        self.active_gesture.is_some()
+        self.gesture_in_flight
     }
 
     /// Registers a callback with a priority and initial enabled flag.
@@ -185,28 +230,37 @@ impl BackDispatcher {
         enabled: bool,
         callback: impl FnMut(BackEvent) + 'static,
     ) -> BackHandle {
+        let mut callback = callback;
+        self.register_reentrant(priority, enabled, move |event, _| callback(event))
+    }
+
+    /// Registers a callback that may queue registration changes during dispatch.
+    pub fn register_reentrant(
+        &mut self,
+        priority: i32,
+        enabled: bool,
+        callback: impl FnMut(BackEvent, &mut BackCommands<'_>) + 'static,
+    ) -> BackHandle {
         let id = self.next_id;
         self.next_id += 1;
-        let sequence = self.sequence;
-        self.sequence += 1;
-        self.entries
-            .insert(id, Entry { priority, sequence, enabled, callback: Box::new(callback) });
+        self.entries.insert(id, Entry { priority, enabled, callback: Box::new(callback) });
         BackHandle { id }
     }
 
     /// Removes the callback registered under `id`. If it held the active
-    /// gesture, the gesture is aborted. Returns `true` if one existed.
+    /// gesture, it receives cancellation; a later progress event may choose
+    /// another handler. Returns `true` if one existed.
     pub fn unregister(&mut self, id: u64) -> bool {
         if self.active_gesture == Some(id) {
             self.active_gesture = None;
+            self.dispatch_to(id, BackEvent::cancelled(), true);
         }
         self.entries.remove(&id).is_some()
     }
 
     /// Enables or disables a callback. Returns `true` if `id` exists.
-    /// Disabling the gesture owner means later gesture events report
-    /// unhandled (`false`) while the gesture stays marked in flight, so the
-    /// host can still cancel cleanly.
+    /// Disabling a gesture owner affects future gestures but does not change
+    /// the owner already claimed for the current gesture.
     pub fn set_enabled(&mut self, id: u64, enabled: bool) -> bool {
         if let Some(entry) = self.entries.get_mut(&id) {
             entry.enabled = enabled;
@@ -225,10 +279,12 @@ impl BackDispatcher {
     /// Regular back invocation. Routes to the current winner.
     /// Returns `true` when a handler consumed the event.
     pub fn back(&mut self) -> bool {
-        let Some(id) = self.winner() else {
+        let id = self.active_gesture.take().or_else(|| self.winner());
+        self.gesture_in_flight = false;
+        let Some(id) = id else {
             return false;
         };
-        self.dispatch_to(id, BackEvent::invoked())
+        self.dispatch_to(id, BackEvent::invoked(), true)
     }
 
     /// Starts a predictive gesture, claiming the current winner.
@@ -236,10 +292,12 @@ impl BackDispatcher {
     pub fn predictive_start(&mut self) -> bool {
         let Some(id) = self.winner() else {
             self.active_gesture = None;
+            self.gesture_in_flight = false;
             return false;
         };
+        self.gesture_in_flight = true;
         self.active_gesture = Some(id);
-        self.dispatch_to(id, BackEvent::started())
+        self.dispatch_to(id, BackEvent::started(), true)
     }
 
     /// Delivers progress to the gesture owner.
@@ -249,10 +307,18 @@ impl BackDispatcher {
     /// Returns [`BackError::NoGestureInProgress`] when no gesture is in
     /// flight.
     pub fn predictive_progress(&mut self, progress: f32) -> Result<bool, BackError> {
-        let Some(id) = self.active_gesture else {
+        if !self.gesture_in_flight {
             return Err(BackError::NoGestureInProgress);
-        };
-        Ok(self.dispatch_to(id, BackEvent::progressed(progress)))
+        }
+        if self.active_gesture.is_none() {
+            self.active_gesture = self.winner();
+            if let Some(id) = self.active_gesture {
+                self.dispatch_to(id, BackEvent::started(), true);
+            }
+        }
+        Ok(self
+            .active_gesture
+            .is_some_and(|id| self.dispatch_to(id, BackEvent::progressed(progress), true)))
     }
 
     /// Cancels the in-flight gesture, delivering `Cancelled` to its owner.
@@ -262,10 +328,14 @@ impl BackDispatcher {
     /// Returns [`BackError::NoGestureInProgress`] when no gesture is in
     /// flight.
     pub fn predictive_cancel(&mut self) -> Result<bool, BackError> {
-        let Some(id) = self.active_gesture.take() else {
+        if !self.gesture_in_flight {
             return Err(BackError::NoGestureInProgress);
-        };
-        Ok(self.dispatch_to(id, BackEvent::cancelled()))
+        }
+        self.gesture_in_flight = false;
+        Ok(self
+            .active_gesture
+            .take()
+            .is_some_and(|id| self.dispatch_to(id, BackEvent::cancelled(), true)))
     }
 
     /// Completes the in-flight gesture, delivering `Invoked` to its owner.
@@ -275,28 +345,45 @@ impl BackDispatcher {
     /// Returns [`BackError::NoGestureInProgress`] when no gesture is in
     /// flight.
     pub fn predictive_invoke(&mut self) -> Result<bool, BackError> {
-        let Some(id) = self.active_gesture.take() else {
+        if !self.gesture_in_flight {
             return Err(BackError::NoGestureInProgress);
-        };
-        Ok(self.dispatch_to(id, BackEvent::invoked()))
+        }
+        self.gesture_in_flight = false;
+        let id = self.active_gesture.take().or_else(|| self.winner());
+        Ok(id.is_some_and(|id| self.dispatch_to(id, BackEvent::invoked(), true)))
     }
 
     fn winner(&self) -> Option<u64> {
         self.entries
             .iter()
             .filter(|(_, entry)| entry.enabled)
-            .max_by_key(|(_, entry)| (entry.priority, entry.sequence))
+            .max_by_key(|(id, entry)| (entry.priority, *id))
             .map(|(id, _)| *id)
     }
 
-    fn dispatch_to(&mut self, id: u64, event: BackEvent) -> bool {
+    fn dispatch_to(&mut self, id: u64, event: BackEvent, force: bool) -> bool {
+        let mut commands = BackCommands { next_id: &mut self.next_id, pending: Vec::new() };
+        let mut handled = false;
         if let Some(entry) = self.entries.get_mut(&id) {
-            if entry.enabled {
-                (entry.callback)(event);
-                return true;
+            if entry.enabled || force {
+                (entry.callback)(event, &mut commands);
+                handled = true;
             }
         }
-        false
+        for command in commands.pending {
+            match command {
+                BackCommand::Register(id, priority, enabled, callback) => {
+                    self.entries.insert(id, Entry { priority, enabled, callback });
+                }
+                BackCommand::Unregister(id) => {
+                    self.unregister(id);
+                }
+                BackCommand::SetEnabled(id, enabled) => {
+                    self.set_enabled(id, enabled);
+                }
+            }
+        }
+        handled
     }
 }
 
@@ -458,5 +545,75 @@ mod tests {
         // After the gesture, the newcomer wins regular back handling.
         assert!(dispatcher.back());
         assert_eq!(*newcomer_calls.borrow(), 1);
+    }
+
+    #[test]
+    fn callback_can_unregister_itself_and_register_successor() {
+        use std::cell::Cell;
+        let mut dispatcher = BackDispatcher::new();
+        let own_id = Rc::new(Cell::new(u64::MAX));
+        let own_id_in_callback = Rc::clone(&own_id);
+        let calls = Rc::new(RefCell::new(Vec::new()));
+        let first_calls = Rc::clone(&calls);
+        let successor_calls = Rc::clone(&calls);
+        let handle = dispatcher.register_reentrant(0, true, move |event, commands| {
+            if event.phase == BackPhase::Invoked {
+                first_calls.borrow_mut().push("first");
+                commands.unregister(own_id_in_callback.get());
+                commands.register(0, true, {
+                    let successor_calls = Rc::clone(&successor_calls);
+                    move |_, _| successor_calls.borrow_mut().push("successor")
+                });
+            }
+        });
+        own_id.set(handle.id());
+        assert!(dispatcher.back());
+        assert_eq!(dispatcher.handler_count(), 1);
+        assert!(dispatcher.back());
+        assert_eq!(*calls.borrow(), vec!["first", "successor"]);
+    }
+
+    #[test]
+    fn removed_gesture_owner_is_cancelled_and_fallback_starts_on_progress() {
+        let mut dispatcher = BackDispatcher::new();
+        let calls = Rc::new(RefCell::new(Vec::new()));
+        let older = Rc::clone(&calls);
+        let selected = Rc::clone(&calls);
+        dispatcher.register(0, true, move |event| older.borrow_mut().push(("older", event.phase)));
+        let selected_handle = dispatcher.register(0, true, move |event| {
+            selected.borrow_mut().push(("selected", event.phase));
+        });
+        assert!(dispatcher.predictive_start());
+        assert!(dispatcher.unregister(selected_handle.id()));
+        assert!(dispatcher.has_active_gesture());
+        assert!(dispatcher.predictive_progress(0.4).unwrap());
+        assert!(dispatcher.predictive_invoke().unwrap());
+        assert_eq!(
+            *calls.borrow(),
+            vec![
+                ("selected", BackPhase::Started),
+                ("selected", BackPhase::Cancelled),
+                ("older", BackPhase::Started),
+                ("older", BackPhase::Progressed),
+                ("older", BackPhase::Invoked),
+            ]
+        );
+    }
+
+    #[test]
+    fn disabling_gesture_owner_does_not_interrupt_claim() {
+        let mut dispatcher = BackDispatcher::new();
+        let calls = Rc::new(RefCell::new(Vec::new()));
+        let probe = Rc::clone(&calls);
+        let handle =
+            dispatcher.register(0, true, move |event| probe.borrow_mut().push(event.phase));
+        assert!(dispatcher.predictive_start());
+        assert!(dispatcher.set_enabled(handle.id(), false));
+        assert!(dispatcher.predictive_progress(0.4).unwrap());
+        assert!(dispatcher.predictive_cancel().unwrap());
+        assert_eq!(
+            *calls.borrow(),
+            vec![BackPhase::Started, BackPhase::Progressed, BackPhase::Cancelled]
+        );
     }
 }

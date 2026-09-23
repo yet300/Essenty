@@ -221,15 +221,16 @@ impl StateKeeper {
             .map_err(|reason| StateKeeperError::Decode { key: key.to_owned(), reason })
     }
 
-    /// Saves all registered providers into a deterministic (key-ordered)
-    /// map, evaluating providers in key order. The first encoding failure
+    /// Saves unconsumed restored entries and registered providers into a
+    /// deterministic (key-ordered) map. Providers replace restored values
+    /// with the same key. The first encoding failure
     /// aborts the save with [`StateKeeperError::Encode`].
     ///
     /// # Errors
     ///
     /// Returns [`StateKeeperError::Encode`] if any provider fails.
     pub fn save(&self) -> Result<BTreeMap<String, Vec<u8>>, StateKeeperError> {
-        let mut out = BTreeMap::new();
+        let mut out = self.restored.clone();
         for (key, provider) in &self.providers {
             out.insert(key.clone(), provider()?);
         }
@@ -339,7 +340,7 @@ mod tests {
         assert!(keeper.unregister("k"));
         assert!(!keeper.has_provider("k"));
         assert!(!keeper.unregister("k"));
-        assert!(keeper.save().unwrap().is_empty());
+        assert_eq!(keeper.save().unwrap().get("k"), Some(&vec![9]));
         // Restored bytes survive unregistration.
         assert_eq!(keeper.consume_bytes("k"), Some(vec![9]));
     }
@@ -361,5 +362,20 @@ mod tests {
             err,
             StateKeeperError::Encode { key: "bad".to_owned(), reason: "boom".to_owned() }
         );
+    }
+
+    #[test]
+    fn unconsumed_restored_values_survive_another_save() {
+        let mut keeper = StateKeeper::with_restored(BTreeMap::from([
+            ("old".to_owned(), vec![1]),
+            ("replaced".to_owned(), vec![2]),
+            ("consumed".to_owned(), vec![3]),
+        ]));
+        assert_eq!(keeper.consume_bytes("consumed"), Some(vec![3]));
+        keeper.register("replaced", || vec![9]).unwrap();
+        let saved = keeper.save().unwrap();
+        assert_eq!(saved.get("old"), Some(&vec![1]));
+        assert_eq!(saved.get("replaced"), Some(&vec![9]));
+        assert!(!saved.contains_key("consumed"));
     }
 }

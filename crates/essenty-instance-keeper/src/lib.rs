@@ -15,6 +15,7 @@
 //! - [`InstanceKeeper::destroy`] / [`InstanceKeeper::clear`] release the
 //!   keeper's ownership. The value is dropped once all external clones are
 //!   also gone, at which point [`Drop`] cleanup runs.
+//! - [`InstanceKeeper::destroy_all`] ends the whole retention scope.
 //! - Requesting a key with a different type than the retained value returns
 //!   [`InstanceKeeperError::TypeMismatch`] instead of panicking.
 //!
@@ -48,14 +49,18 @@ pub enum InstanceKeeperError {
     /// The key is retained but holds a different type than requested.
     #[error("type mismatch for instance key '{0}'")]
     TypeMismatch(String),
+    /// The keeper's scope has ended; new values cannot be retained.
+    #[error("instance keeper is destroyed")]
+    Destroyed,
 }
 
 /// Retained-object keeper keyed by strings.
 ///
-/// `BTreeMap` gives deterministic iteration/destruction order (key order).
+/// `BTreeMap` gives deterministic key order for lookup and cleanup.
 #[derive(Default)]
 pub struct InstanceKeeper {
     instances: BTreeMap<String, Rc<dyn Any>>,
+    destroyed: bool,
 }
 
 impl std::fmt::Debug for InstanceKeeper {
@@ -86,6 +91,12 @@ impl InstanceKeeper {
         self.instances.is_empty()
     }
 
+    /// Whether the retained scope has ended.
+    #[must_use]
+    pub fn is_destroyed(&self) -> bool {
+        self.destroyed
+    }
+
     /// Returns `true` when an instance is retained under `key`.
     #[must_use]
     pub fn contains(&self, key: &str) -> bool {
@@ -111,6 +122,9 @@ impl InstanceKeeper {
         T: 'static,
         F: FnOnce() -> T,
     {
+        if self.destroyed {
+            return Err(InstanceKeeperError::Destroyed);
+        }
         if let Some(existing) = self.instances.get(key) {
             return Rc::downcast::<T>(Rc::clone(existing))
                 .map_err(|_| InstanceKeeperError::TypeMismatch(key.to_owned()));
@@ -150,6 +164,16 @@ impl InstanceKeeper {
     /// Values with outstanding external clones drop when those clones drop.
     pub fn clear(&mut self) {
         self.instances.clear();
+    }
+
+    /// Ends this scope and releases all keeper-owned references. Subsequent
+    /// creation returns [`InstanceKeeperError::Destroyed`]. External `Rc`
+    /// clones retain their values until their final owner drops them.
+    pub fn destroy_all(&mut self) {
+        if !self.destroyed {
+            self.destroyed = true;
+            self.clear();
+        }
     }
 }
 
@@ -267,5 +291,19 @@ mod tests {
             assert_eq!(drops.get(), 0);
         }
         assert_eq!(drops.get(), 1);
+    }
+
+    #[test]
+    fn terminal_destroy_is_idempotent_and_rejects_new_instances() {
+        let mut keeper = InstanceKeeper::new();
+        keeper.get_or_create("old", || 3_u32).unwrap();
+        keeper.destroy_all();
+        keeper.destroy_all();
+        assert!(keeper.is_destroyed());
+        assert!(keeper.is_empty());
+        assert_eq!(
+            keeper.get_or_create("new", || 4_u32).unwrap_err(),
+            InstanceKeeperError::Destroyed
+        );
     }
 }

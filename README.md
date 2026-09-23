@@ -57,6 +57,12 @@ Android  Apple      Web
 | `essenty-apple` | One Apple-family crate (iOS, macOS, watchOS, tvOS, visionOS, Mac Catalyst) with shared implementation | Bootstrap adapters + tests; `objc2` observers planned |
 | `essenty-web` | Visibility → lifecycle, `popstate` → back, storage key namespacing; `wasm32`-only live bindings seam | Bootstrap mappings + tests; listener wiring planned |
 
+The umbrella `essenty` crate also provides `Runtime`, `PlatformEvent`, and
+`DispatchResult` for one-event-at-a-time host integration. See
+[`docs/FFI_ARCHITECTURE.md`](docs/FFI_ARCHITECTURE.md) for ownership and FFI
+rules, and [`docs/SEMANTIC_COMPATIBILITY.md`](docs/SEMANTIC_COMPATIBILITY.md)
+for the audited upstream behavior and intentional Rust differences.
+
 ## Platforms
 
 Core crates are written against `core`/`alloc`-compatible containers and
@@ -115,6 +121,17 @@ back.register(0, true, |event| println!("back {event:?}"));
 assert!(back.back());
 ```
 
+For a platform host, send a coarse event to one Rust runtime:
+
+```rust
+use essenty::{PlatformEvent, Runtime, LifecycleState};
+
+let mut runtime = Runtime::new();
+runtime.dispatch(PlatformEvent::Lifecycle(LifecycleState::Resumed)).unwrap();
+let result = runtime.dispatch(PlatformEvent::BackPressed).unwrap();
+assert_eq!(result.back_handled, Some(false));
+```
+
 `serde`-based state with a caller-chosen codec (JSON shown as one option;
 `postcard`/`bincode` work the same way):
 
@@ -168,9 +185,9 @@ cargo check --workspace --target x86_64-unknown-linux-gnu
   each chosen so misuse is a compile-time or explicit-runtime outcome, not a
   lifecycle leak.
 - **Single-threaded cores.** Core types are `!Send`/`!Sync` (via `Rc`,
-  `RefCell`, `FnMut`) so they work on WASM and single-threaded UI loops.
-  Multithreaded hosts confine the object to one thread or wrap it in a
-  `Mutex` — `Send`/`Sync` is never imposed without justification.
+  `RefCell`, `FnMut`) where their ownership requires it. Multithreaded hosts
+  confine the runtime to one thread or provide a dedicated wrapper;
+  `Send`/`Sync` is never imposed without justification.
 - **Typed errors, no panics.** Library code returns `LifecycleError`,
   `StateKeeperError`, `InstanceKeeperError`, `BackError`; `unwrap`/`expect`
   appear only in tests. No `unsafe` in this milestone
