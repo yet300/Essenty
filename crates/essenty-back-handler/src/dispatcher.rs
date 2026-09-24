@@ -1,5 +1,6 @@
 use crate::{BackError, BackEvent, GesturePosition};
 use std::collections::BTreeMap;
+use std::rc::Rc;
 
 /// Registration token returned by [`BackDispatcher::register`].
 ///
@@ -87,7 +88,13 @@ pub struct BackDispatcher {
     next_id: u64,
     active_gesture: Option<u64>,
     gesture_in_flight: bool,
+    gesture_start_event: Option<BackEvent>,
+    enabled_listeners: BTreeMap<u64, EnabledListener>,
+    next_listener_id: u64,
+    has_enabled: bool,
 }
+
+type EnabledListener = Rc<dyn Fn(bool)>;
 
 impl std::fmt::Debug for BackDispatcher {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -116,6 +123,28 @@ impl BackDispatcher {
     #[must_use]
     pub fn can_handle(&self) -> bool {
         self.entries.values().any(|entry| entry.enabled)
+    }
+
+    /// Adds a listener invoked with the aggregate enabled state whenever it
+    /// changes (at least one enabled handler appears or the last one
+    /// disappears/is removed).
+    ///
+    /// This mirrors upstream `BackDispatcher.addEnabledChangedListener` and
+    /// lets platform adapters (e.g. Android `OnBackInvokedCallback`) track
+    /// native registration without polling. Returns a token for
+    /// [`BackDispatcher::remove_enabled_changed_listener`].
+    pub fn add_enabled_changed_listener(&mut self, listener: impl Fn(bool) + 'static) -> u64 {
+        let id = self.next_listener_id;
+        self.next_listener_id += 1;
+        self.enabled_listeners.insert(id, Rc::new(listener));
+        id
+    }
+
+    /// Removes a listener added by
+    /// [`BackDispatcher::add_enabled_changed_listener`]. Returns `true` when
+    /// one existed.
+    pub fn remove_enabled_changed_listener(&mut self, id: u64) -> bool {
+        self.enabled_listeners.remove(&id).is_some()
     }
 
     /// Returns `true` while a predictive gesture is in flight.
@@ -147,7 +176,23 @@ impl BackDispatcher {
         let id = self.next_id;
         self.next_id += 1;
         self.entries.insert(id, Entry { priority, enabled, callback: Box::new(callback) });
+        self.notify_enabled_changed();
         BackHandle { id }
+    }
+
+    /// Notifies aggregate enabled-state listeners when `can_handle` changed.
+    /// Listeners are snapshotted before delivery so they may add or remove
+    /// listeners without aliasing the dispatcher.
+    fn notify_enabled_changed(&mut self) {
+        let now = self.can_handle();
+        if now == self.has_enabled {
+            return;
+        }
+        self.has_enabled = now;
+        let listeners = self.enabled_listeners.values().map(Rc::clone).collect::<Vec<_>>();
+        for listener in listeners {
+            listener(now);
+        }
     }
 
     /// Removes the callback registered under `id`. If it held the active
@@ -158,7 +203,9 @@ impl BackDispatcher {
             self.active_gesture = None;
             self.dispatch_to(id, BackEvent::cancelled(), true);
         }
-        self.entries.remove(&id).is_some()
+        let removed = self.entries.remove(&id).is_some();
+        self.notify_enabled_changed();
+        removed
     }
 
     /// Enables or disables a callback. Returns `true` if `id` exists.
@@ -167,10 +214,32 @@ impl BackDispatcher {
     pub fn set_enabled(&mut self, id: u64, enabled: bool) -> bool {
         if let Some(entry) = self.entries.get_mut(&id) {
             entry.enabled = enabled;
+            self.notify_enabled_changed();
             true
         } else {
             false
         }
+    }
+
+    /// Changes a callback's priority, affecting future winner selection but
+    /// not the owner already claimed for the current gesture.
+    ///
+    /// This mirrors the mutable upstream `BackCallback.priority`.
+    /// Returns `true` if `id` exists.
+    pub fn set_priority(&mut self, id: u64, priority: i32) -> bool {
+        if let Some(entry) = self.entries.get_mut(&id) {
+            entry.priority = priority;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Returns the priority of the callback registered under `id`, or `None`
+    /// when `id` is unknown.
+    #[must_use]
+    pub fn priority(&self, id: u64) -> Option<i32> {
+        self.entries.get(&id).map(|entry| entry.priority)
     }
 
     /// Returns `true` when `id` is registered and enabled.
@@ -184,6 +253,7 @@ impl BackDispatcher {
     pub fn back(&mut self) -> bool {
         let id = self.active_gesture.take().or_else(|| self.winner());
         self.gesture_in_flight = false;
+        self.gesture_start_event = None;
         let Some(id) = id else {
             return false;
         };
@@ -205,10 +275,12 @@ impl BackDispatcher {
         let Some(id) = self.winner() else {
             self.active_gesture = None;
             self.gesture_in_flight = false;
+            self.gesture_start_event = None;
             return false;
         };
         self.gesture_in_flight = true;
         self.active_gesture = Some(id);
+        self.gesture_start_event = Some(event);
         self.dispatch_to(id, event, true)
     }
 
@@ -241,8 +313,11 @@ impl BackDispatcher {
         }
         if self.active_gesture.is_none() {
             self.active_gesture = self.winner();
-            if let Some(id) = self.active_gesture {
-                self.dispatch_to(id, BackEvent::started(), true);
+            // A fallback handler selected after the original owner was
+            // removed first receives the original start event, mirroring
+            // upstream `progressPredictiveBack` fallback behavior.
+            if let (Some(id), Some(start)) = (self.active_gesture, self.gesture_start_event) {
+                self.dispatch_to(id, start, true);
             }
         }
         Ok(self.active_gesture.is_some_and(|id| self.dispatch_to(id, event, true)))
@@ -259,6 +334,7 @@ impl BackDispatcher {
             return Err(BackError::NoGestureInProgress);
         }
         self.gesture_in_flight = false;
+        self.gesture_start_event = None;
         Ok(self
             .active_gesture
             .take()
@@ -276,6 +352,7 @@ impl BackDispatcher {
             return Err(BackError::NoGestureInProgress);
         }
         self.gesture_in_flight = false;
+        self.gesture_start_event = None;
         let id = self.active_gesture.take().or_else(|| self.winner());
         Ok(id.is_some_and(|id| self.dispatch_to(id, BackEvent::invoked(), true)))
     }
@@ -310,6 +387,9 @@ impl BackDispatcher {
                 }
             }
         }
+        // Queued registrations bypass the direct `register` path; reconcile
+        // aggregate listeners once after all commands applied.
+        self.notify_enabled_changed();
         handled
     }
 }

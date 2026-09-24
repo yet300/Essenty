@@ -238,3 +238,86 @@ fn disabling_gesture_owner_does_not_interrupt_claim() {
         vec![BackPhase::Started, BackPhase::Progressed, BackPhase::Cancelled]
     );
 }
+
+#[test]
+fn enabled_changed_listeners_fire_only_on_aggregate_transitions() {
+    let mut dispatcher = BackDispatcher::new();
+    let events = Rc::new(RefCell::new(Vec::new()));
+    let probe = Rc::clone(&events);
+    let listener = dispatcher.add_enabled_changed_listener(move |enabled| {
+        probe.borrow_mut().push(enabled);
+    });
+    // Disabled registration does not change the aggregate.
+    let disabled = dispatcher.register(0, false, |_| {});
+    assert!(events.borrow().is_empty());
+    // First enabled handler flips the aggregate to true.
+    let first = dispatcher.register(0, true, |_| {});
+    assert_eq!(*events.borrow(), vec![true]);
+    // Second enabled handler leaves the aggregate unchanged.
+    let second = dispatcher.register(0, true, |_| {});
+    assert_eq!(*events.borrow(), vec![true]);
+    // Disabling one of two enabled handlers leaves the aggregate unchanged.
+    assert!(dispatcher.set_enabled(first.id(), false));
+    assert_eq!(*events.borrow(), vec![true]);
+    // Disabling the last enabled handler flips the aggregate to false.
+    assert!(dispatcher.set_enabled(second.id(), false));
+    assert_eq!(*events.borrow(), vec![true, false]);
+    // Re-enabling flips it back; removing the listener stops delivery.
+    assert!(dispatcher.set_enabled(disabled.id(), true));
+    assert_eq!(*events.borrow(), vec![true, false, true]);
+    assert!(dispatcher.remove_enabled_changed_listener(listener));
+    assert!(!dispatcher.remove_enabled_changed_listener(listener));
+    assert!(dispatcher.unregister(first.id()));
+    assert_eq!(*events.borrow(), vec![true, false, true]);
+}
+
+#[test]
+fn set_priority_changes_winner_selection() {
+    let mut dispatcher = BackDispatcher::new();
+    let low = Rc::new(RefCell::new(0_u32));
+    let high = Rc::new(RefCell::new(0_u32));
+    let low_probe = Rc::clone(&low);
+    let high_probe = Rc::clone(&high);
+    let low_handle = dispatcher.register(0, true, move |_| *low_probe.borrow_mut() += 1);
+    let high_handle = dispatcher.register(0, true, move |_| *high_probe.borrow_mut() += 1);
+    // Tie breaks toward the later registration.
+    assert!(dispatcher.back());
+    assert_eq!((*low.borrow(), *high.borrow()), (0, 1));
+    assert_eq!(dispatcher.priority(low_handle.id()), Some(0));
+    // Raising the earlier handler's priority makes it win.
+    assert!(dispatcher.set_priority(low_handle.id(), 3));
+    assert_eq!(dispatcher.priority(low_handle.id()), Some(3));
+    assert!(dispatcher.back());
+    assert_eq!((*low.borrow(), *high.borrow()), (1, 1));
+    assert!(!dispatcher.set_priority(999, 1));
+    assert_eq!(dispatcher.priority(high_handle.id()), Some(0));
+    assert_eq!(dispatcher.priority(999), None);
+}
+
+#[test]
+fn fallback_after_owner_removal_replays_original_start_event() {
+    let mut dispatcher = BackDispatcher::new();
+    let calls = Rc::new(RefCell::new(Vec::new()));
+    let older = Rc::clone(&calls);
+    let selected = Rc::clone(&calls);
+    dispatcher.register(0, true, move |event| older.borrow_mut().push(("older", event)));
+    let selected_handle = dispatcher.register(0, true, move |event| {
+        selected.borrow_mut().push(("selected", event));
+    });
+    let start_position =
+        GesturePosition { swipe_edge: SwipeEdge::Left, touch_x: 12.5, touch_y: 24.0 };
+    assert!(dispatcher.predictive_start_with(start_position));
+    assert!(dispatcher.unregister(selected_handle.id()));
+    let progress_position =
+        GesturePosition { swipe_edge: SwipeEdge::Right, touch_x: 28.0, touch_y: 40.5 };
+    assert!(dispatcher.predictive_progress_with(0.4, progress_position).unwrap());
+    let log = calls.borrow();
+    assert_eq!(log.len(), 4);
+    // Selected owner saw the positioned start, then cancellation.
+    assert_eq!(log[0].1, BackEvent::started_with(start_position));
+    assert_eq!(log[0].1.phase, BackPhase::Started);
+    assert_eq!(log[1].1.phase, BackPhase::Cancelled);
+    // Fallback first receives the *original* start event, then progress.
+    assert_eq!(log[2].1, BackEvent::started_with(start_position));
+    assert_eq!(log[3].1, BackEvent::progressed_with(0.4, progress_position));
+}
