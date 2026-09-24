@@ -55,7 +55,7 @@ Android  Apple      Web
 | `essenty-state-keeper` | Byte providers, restore consumption, pluggable codecs | Upstream Essenty behavior, Rust codec extension | Implemented; unit tested |
 | `essenty-instance-keeper` | Retained objects and deterministic cleanup | Upstream Essenty behavior | Implemented; unit tested |
 | `essenty-back-handler` | Regular and predictive back dispatch, including gesture position | Upstream Essenty behavior, Rust API | Implemented; unit tested |
-| `essenty-android` | NativeActivity lifecycle/state and direct platform back callbacks | Rust extension for Android Essenty semantics | Android target compile-tested; predictive proxy runtime proof on API 36; API 33 and full integration runtime checks pending |
+| `essenty-android` | NativeActivity lifecycle/state/config retention and direct platform back callbacks | Rust extension for Android Essenty semantics | API 36.1 runtime-tested (retention, process-death restore, back cancel/invoke/teardown); API 33, API 34 phone, and pre-33 runtime checks pending |
 | `essenty-apple` | Application notifications through `objc2` | Rust extension | macOS runtime-tested; other Apple targets compile-tested |
 | `essenty-web` | Browser lifecycle, history, and storage | Rust extension | Compile-tested; browser runtime testing planned |
 

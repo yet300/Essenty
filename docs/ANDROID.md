@@ -9,13 +9,14 @@ callback implementation. `jni-min-helper` embeds its own private proxy support.
 | Capability | Implementation | Origin | Verification |
 |---|---|---|---|
 | Lifecycle | `NativeActivityLifecycle` over `android-activity` events | Rust backend for Android Essenty semantics | Compile checked and API 36.1 emulator lifecycle events exercised |
-| StateKeeper | `NativeActivityState` plus versioned binary envelope | Rust backend for Android Essenty semantics | Host codec tests and API 36.1 unhandled-orientation recreation restored a saved marker; process relaunch not exercised |
+| StateKeeper | `NativeActivityState` plus versioned binary envelope | Rust backend for Android Essenty semantics | Host codec tests, API 36.1 recreation restores a saved marker, and API 36.1 process-death relaunch restores the marker |
 | InstanceKeeper core | Existing local `Rc` keeper | Shared core semantics | Implemented; no core ownership change |
 | NativeActivity configuration retention | `MainEvent::ConfigChanged`; app declares handled changes | Rust-native Activity host model | Runtime verified on API 36.1: rotation, locale, night mode, resizing, and 50 events without recreation |
 | Arbitrary Activity recreation retention | No cross-thread transfer of retained `Rc` values | Unsupported for non-`Send` retained values | Explicitly unsupported; use `StateKeeper` for serializable state |
-| Back below API 33 | NativeActivity `KEYCODE_BACK` | Rust backend for Android Essenty semantics | Compile checked; this run did not exercise a pre-33 emulator |
-| Back on API 33 | `OnBackInvokedCallback` through `DynamicProxy` | Rust backend for Android Essenty semantics | Compile checked; API 33 emulator image unavailable |
-| Back on API 34+ | `OnBackAnimationCallback` through `DynamicProxy` | Rust backend for Android Essenty semantics | API 36.1 integrated adapter attached, received a cancelled predictive gesture, and unregistered on close; invoke was not shell-gesture verified |
+| Host configuration diagnostic | `native_config::inspect_host_configuration` via `PackageManager` | Rust-only diagnostic | Host unit-tested; live-device read is implemented and compiles for both Android ABIs, readout on device pending |
+| Back below API 33 | NativeActivity `KEYCODE_BACK` | Rust backend for Android Essenty semantics | Compile checked; no pre-33 emulator image available in this environment |
+| Back on API 33 | `OnBackInvokedCallback` through `DynamicProxy` | Rust backend for Android Essenty semantics | Compile checked; API 33 system image download stalled, no AVD provisioned |
+| Back on API 34+ | `OnBackAnimationCallback` through `DynamicProxy` | Rust backend for Android Essenty semantics | API 36.1 integrated adapter: attach, started/progressed/cancelled, committed invoke finishing the host, unregister-on-teardown, and no Rust dispatch after destroy |
 
 ## Back handling
 
@@ -36,7 +37,11 @@ the core. The API 34+ mapping preserves progress, edge, and touch coordinates.
 Registration and unregistration are posted through
 `AndroidApp::run_on_java_main_thread`. A setup or teardown error can be read
 with `take_error`. The adapter owns the proxy and dispatcher global reference;
-unregister runs before those references are released. Dropping during an owned
+unregister runs before those references are released. `attach` plus explicit
+`close` is the reviewed pre-1.0 shape: `close` gives synchronous,
+error-reporting teardown while `Drop` keeps a fire-and-forget uninstall as the
+safe fallback (it cannot report errors and must not block gesture teardown).
+No rename or RAII-only redesign is planned. Dropping during an owned
 gesture defers unregister until the terminal platform callback. If Java rejects
 unregister, the adapter keeps the proxy alive and retries on a later Android
 host attach; that exceptional fallback can retain the old dispatcher until the
@@ -102,59 +107,67 @@ boundary. See Android's [`android:configChanges` reference](https://developer.an
 [`NativeActivity.onConfigurationChanged`](https://developer.android.com/reference/android/app/NativeActivity#onConfigurationChanged(android.content.res.Configuration)),
 and [`android-activity::MainEvent`](https://docs.rs/android-activity/0.6.1/android_activity/enum.MainEvent.html).
 
-For a Rust UI that can refresh itself from the new window and configuration
-state, the recommended broad NativeActivity declaration is:
+Declare only the changes the Rust UI actually handles. Claiming a category
+means the app refreshes itself from the new configuration; a declared but
+ignored category silently keeps stale layout, theme, or locale. The
+recommendation is therefore split. The Rust source of truth is
+`essenty_android::native_config::NativeConfigCategory`; the strings below
+must match `baseline_manifest_value()` and `extended_manifest_value()`, which
+a unit test pins.
+
+Baseline (commonly required for a self-drawn Rust UI):
 
 ```toml
-[package.metadata.android.application.activity]
-config_changes = "orientation|screenSize|smallestScreenSize|screenLayout|uiMode|keyboard|keyboardHidden|navigation|touchscreen|locale|layoutDirection|mcc|mnc|density|fontScale|fontWeightAdjustment|colorMode|grammaticalGender"
+[[package.metadata.android.application.activity]]
+config_changes = "orientation|screenSize|smallestScreenSize|screenLayout|uiMode|density|fontScale|locale|layoutDirection"
 ```
 
-This is Cargo metadata used by `cargo-apk` and `cargo-apk2`; it generates the
-manifest declaration without a hand-maintained manifest. For `cargo-apk2`
-versions/configurations that declare activities as an array, put the same field
-under `[[package.metadata.android.application.activity]]`. `cargo-apk2` documents
-Cargo metadata and NativeActivity packaging in its [manifest configuration
-guide](https://github.com/mzdk100/cargo-apk2#manifest); `cargo-apk` uses the same
-package metadata model. Keep this on the application package's manifest, not a
-library dependency.
+Extended (opt in only when the app reacts to the new state):
 
-The recommendation covers the standard documented configuration categories,
-including display geometry and resources, locale/direction, input hardware,
-theme/color, font, and telephony configuration. The API introduction and Rust
-event status are summarized below. Older Android versions ignore categories
-they do not know; the installed platform SDK compiles the manifest values, and
-the API 36.1 runtime exercised the listed changes available on that device.
+```toml
+[[package.metadata.android.application.activity]]
+config_changes = "orientation|screenSize|smallestScreenSize|screenLayout|uiMode|density|fontScale|locale|layoutDirection|keyboard|keyboardHidden|navigation|touchscreen|mcc|mnc|colorMode|fontWeightAdjustment|grammaticalGender"
+```
 
-| Manifest category | Platform availability | Rust/event handling | Runtime notes |
-|---|---|---|---|
-| `orientation` | API 1 | `ConfigChanged`; query `AndroidApp::config()` and window size | API 36.1 portrait/landscape tested |
-| `screenSize`, `smallestScreenSize` | API 13 | `ConfigChanged`; redraw from current window/config | API 36.1 display resize tested; significant-size behavior varies by OS |
-| `screenLayout` | API 4 | `ConfigChanged`; re-read configuration | Included for layout and multi-window changes |
-| `uiMode` | API 8 | `ConfigChanged`; inspect UI mode | API 36.1 night/light changes tested |
-| `keyboard`, `keyboardHidden`, `navigation`, `touchscreen` | API 1 | `ConfigChanged`; inspect input configuration as needed | Hardware/input changes are less common on the emulator |
-| `locale`, `mcc`, `mnc` | API 1 | `ConfigChanged`; locale/resource configuration is available to Android; app-localized Rust data must be refreshed by the app | System locale change tested; MCC/MNC not available to force on this emulator |
-| `layoutDirection` | API 17 | `ConfigChanged`; query locale/layout direction and update UI | Not separately forced |
-| `density` | API 24 as a manifest value | `ConfigChanged`; query configuration and window metrics | Emulator density was observed; density-change transition not separately forced |
-| `fontScale` | API 1 | `ConfigChanged`; refresh text/layout metrics | Font-scale transition not separately forced |
-| `fontWeightAdjustment` | API 31 | `ConfigChanged`; app refreshes typography | Not separately forced |
-| `colorMode` | API 26 | `ConfigChanged`; app updates color/HDR assumptions | Device lacked a practical color-mode transition |
-| `grammaticalGender` | API 34 | `ConfigChanged`; app refreshes localized text | Not separately forced |
+The extended string is baseline plus the opt-in set, so adopting it later is
+additive. Older Android versions ignore manifest values they do not know, so
+declaring newer categories is harmless on them; it simply does not prevent
+recreation there.
 
-Android documents that an unhandled configuration still recreates the
-Activity. Size changes can also be treated as insignificant on some releases;
-then the activity can stay alive and receive a callback even without the size
-flag. Handling configuration changes means Rust must update its own UI and
-resource-dependent state; it does not make the old layout correct
-automatically. Android 17/API 37 also changes default recreation behavior for
-keyboard, keyboardHidden, navigation, touchscreen, colorMode, and desk-related
-`uiMode` changes. The explicit declaration remains useful for a consistent
-cross-version contract. See [configuration-change guidance](https://developer.android.com/guide/topics/resources/runtime-changes).
+| Manifest category | Set | Since API | What changes | Rust host handling | If declared but ignored |
+|---|---|---|---|---|---|
+| `orientation` | baseline | 1 | Portrait/landscape rotation | `ConfigChanged`; re-read window size and configuration, re-lay out | Old layout on the new orientation |
+| `screenSize` | baseline | 13 | Current screen size (rotation, fold, resize, multi-window) | `ConfigChanged`; redraw from current window/config | Stale layout |
+| `smallestScreenSize` | baseline | 13 | Smallest width (fold, large resize) | `ConfigChanged`; re-evaluate size-class breakpoints | Previous size class kept |
+| `screenLayout` | baseline | 4 | Layout class, including multi-window | `ConfigChanged`; re-read configuration | Missed layout-class transitions |
+| `uiMode` | baseline | 8 | Night mode, desk/car dock | `ConfigChanged`; refresh theme-dependent colors/resources | Previous theme kept |
+| `density` | baseline | 24 | Display density (scaling, moving across displays) | `ConfigChanged`; recompute pixel metrics | Wrong render scale. The `CONFIG_DENSITY` constant predates API 24; the manifest string is honored from API 24 |
+| `fontScale` | baseline | 1 | System font scale | `ConfigChanged`; refresh text metrics and layout | Previous text size kept |
+| `locale` | baseline | 1 | System language | `ConfigChanged`; reload Rust-localized strings. App-localized data is not updated automatically | Previous language kept |
+| `layoutDirection` | baseline | 17 | LTR/RTL direction | `ConfigChanged`; mirror direction-dependent UI | Previous direction kept |
+| `keyboard` | extended | 1 | Hardware keyboard type | Inspect input configuration if the UI adapts; otherwise nothing visible changes | Harmless but misleading |
+| `keyboardHidden` | extended | 1 | Keyboard availability | Update keyboard-dependent layout if any | Harmless but misleading |
+| `navigation` | extended | 1 | Navigation type | Inspect navigation configuration if the UI adapts | Harmless but misleading |
+| `touchscreen` | extended | 1 | Touchscreen type | Relevant only when touch hardware changes | Harmless but misleading |
+| `mcc`, `mnc` | extended | 1 | SIM country/network code | Refresh carrier-dependent data if any | Harmless but misleading |
+| `colorMode` | extended | 26 | Wide gamut, HDR | Update color assumptions for color-sensitive rendering | Harmless but misleading |
+| `fontWeightAdjustment` | extended | 31 | System font weight adjustment | Refresh typography | Previous weight kept |
+| `grammaticalGender` | extended | 34 | Grammatical gender | Refresh localized text inflection | Previous inflection kept |
 
-`assetsPaths` and `resourcesUnused` are newer `ActivityInfo` bit constants, not
+Size changes can also be treated as insignificant on some releases; then the
+activity can stay alive and receive a callback even without the size flag.
+Android 12 (API 31) and 12L (API 32) only deliver `onConfigurationChanged`
+for significant changes; Android 17 (API 37) additionally keeps activities
+alive by default for `keyboard`, `keyboardHidden`, `navigation`,
+`touchscreen`, `colorMode`, and desk-related `uiMode` changes unless the app
+opts back into recreation with `android:recreateOnConfigChanges`. The
+explicit declaration above remains the consistent cross-version contract. See
+[configuration-change guidance](https://developer.android.com/guide/topics/resources/runtime-changes).
+
+`assetsPaths` and `resourcesUnused` are `ActivityInfo` bit constants, not
 documented `android:configChanges` string values for the Activity element, and
-are not part of the recommendation. `resourcesUnused` is specifically unsafe
-for a resource-using UI. Do not substitute `allKnown`: a future platform's
+are not part of either set. `resourcesUnused` is specifically unsafe for a
+resource-using UI. Do not substitute `allKnown`: a future platform's
 categories may require behavior the current app cannot handle.
 
 In this model, configuration retention is semantically sufficient for the
@@ -173,12 +186,32 @@ state. A system recreation caused by an unlisted configuration or another
 system lifecycle event also creates a fresh `android_main`; the old keeper is
 destroyed and arbitrary non-`Send` values cannot be transferred to it.
 
-The Android platform exposes the host Activity's `ActivityInfo.configChanges`
-through PackageManager/JNI, so a future debug validator is technically
-possible. This backend currently does not expose one. A missing flag is an
-unsupported retention configuration, not undefined behavior: the adapter does
-not transfer values, and the application must rely on normal destruction plus
-saved state. The test harness inspects the packaged manifest directly.
+## Host configuration diagnostic
+
+The host Activity's declared `ActivityInfo.configChanges` is readable from
+Rust through `PackageManager`, with no Kotlin, JNI boilerplate, or logging
+dependency imposed on the application:
+
+```rust,ignore
+use essenty_android::native_config::inspect_host_configuration;
+
+let report = inspect_host_configuration(&app)?;
+if !report.meets_baseline() {
+    // One-shot, debug-time diagnostic: do not log on every config event.
+    if let Some(warning) = report.retention_warning() {
+        log::warn!("{warning}");
+    }
+}
+```
+
+`HostConfigurationReport` carries the declared set, the missing baseline and
+extended categories, and any unknown bits from future platform values. A
+missing flag is an unsupported retention configuration, not undefined
+behavior: undeclared changes recreate the Activity, destroy the local keeper,
+and restore only serialized state. `log_host_configuration_warning` is a thin
+`log` convenience around the same check for hosts that already log. The live
+device readout is implemented and compiles for both Android ABIs; the remaining
+step is printing one report from a device run.
 
 ## StateKeeper
 
@@ -194,20 +227,39 @@ Configuration recreation and process restoration rely on Android delivering
 saved-state bytes. The API 36.1 harness deliberately omitted `orientation` for
 one run, registered a StateKeeper byte marker, rotated, observed
 `MainEvent::SaveState`, then saw a second `android_main` invocation with a new
-thread/keeper and the exact saved marker restored. This verifies the native
-saved-state path across an actual Activity recreation. Process relaunch after
-process death was not exercised.
+thread/keeper and the exact saved marker restored. A separate run verified
+real process death: after backgrounding (57-byte saved envelope observed), the
+process was killed with `adb shell am kill` — which preserves saved state,
+unlike force-stop — and relaunching the Activity delivered the exact
+`native-state-round-trip` marker bytes to a fresh `android_main` on a new
+process, thread, and keeper.
 
 ## Retained instances
 
+> **NativeActivity InstanceKeeper retention:** retained Rust object identity
+> is preserved across configuration changes that the host Activity declares
+> as handled through `android:configChanges`. The same `android_main`
+> invocation, Rust thread, and local keeper stay alive; the app redraws from
+> the updated configuration on `MainEvent::ConfigChanged`.
+
+> **Actual Activity recreation:** if Android destroys and recreates the
+> NativeActivity, arbitrary non-`Send` `Rc` retained instances are not
+> transferred to the replacement thread. The old keeper is destroyed on its
+> owning thread; the replacement `android_main` starts with a fresh keeper.
+> This is expected behavior for this backend, not a bug.
+
 The core `InstanceKeeper` owns values through local `Rc`; the Android host uses
-that same keeper directly on the NativeActivity Rust thread. It survives the
-in-place configuration changes declared by the application because the
-`android_main` invocation does not end. There is no Android-specific wrapper,
-process-global keeper registry, `Rc` transfer, or global `Rc` to `Arc` rewrite.
-The guarantee does not cover an Activity recreation. If Android sends
-`MainEvent::Destroy`, the local keeper is destroyed normally. Applications
-should put process-restorable values in `StateKeeper` or persistent storage.
+that same keeper directly on the NativeActivity Rust thread. There is no
+Android-specific wrapper, process-global keeper registry, `Rc` transfer, or
+global `Rc`-to-`Arc` rewrite, and no new keeper type: the existing core
+dispatcher already has the required lifetime, so the host only scopes it to
+the `android_main` invocation. On `MainEvent::Destroy` the app destroys its
+local keeper once and drops retained values on the owning Rust thread. Process
+death ends all `InstanceKeeper` values by design. This differs from upstream
+Android Essenty, which retains values in AndroidX `ViewModelStore` across
+recreated Activities; the two are semantically equivalent only for declared,
+in-place handled configuration changes. Applications should put
+process-restorable values in `StateKeeper` or persistent storage.
 
 ## Lifecycle semantics
 
@@ -215,27 +267,194 @@ should put process-restorable values in `StateKeeper` or persistent storage.
 `LifecycleRegistry` and leaves event polling with the Rust host. This is an
 Essenty semantic adapter, not an AndroidX `LifecycleOwner` attachment. The
 NativeActivity host observes its own event loop and does not synthesize AndroidX
-attachment ordering. See [semantic compatibility](SEMANTIC_COMPATIBILITY.md).
+attachment ordering. Handled `ConfigChanged` events do not touch the Essenty
+lifecycle; only start/pause/resume/stop/destroy move it, and final Activity
+destruction maps to `Destroyed`. See [semantic compatibility](SEMANTIC_COMPATIBILITY.md).
+
+## Rust-only usage
+
+A Rust developer needs no JNI, Java proxies, DEX, AndroidX, or Kotlin
+knowledge to use the four primitives. One `android_main` owns them all; the
+keeper lives as long as the host invocation:
+
+```rust,ignore
+use android_activity::{MainEvent, PollEvent};
+use essenty_android::{AndroidBackHandler, NativeActivityLifecycle, NativeActivityState};
+use essenty_back_handler::BackDispatcher;
+use essenty_instance_keeper::InstanceKeeper;
+use std::time::Duration;
+
+#[unsafe(no_mangle)]
+fn android_main(app: android_activity::AndroidApp) {
+    let host = NativeActivityLifecycle::new(app.clone());
+    let lifecycle = host.registry();
+    let mut keeper = InstanceKeeper::new();
+    let mut back = AndroidBackHandler::attach(&app, BackDispatcher::new());
+    let mut state: Option<NativeActivityState> = None;
+
+    // One-shot debug diagnostic; never on the hot path.
+    if let Ok(report) = essenty_android::native_config::inspect_host_configuration(&app) {
+        essenty_android::native_config::log_host_configuration_warning(&report);
+    }
+
+    let mut destroyed = false;
+    while !destroyed {
+        host.poll_events(Some(Duration::from_millis(50)), |event| match event {
+            PollEvent::Main(MainEvent::Resume { loader, .. }) if state.is_none() => {
+                state = Some(NativeActivityState::from_loader(&loader).unwrap());
+            }
+            PollEvent::Main(MainEvent::SaveState { saver, .. }) => {
+                let snapshot = state.as_ref().unwrap().save_bytes().unwrap();
+                NativeActivityState::store(&saver, &snapshot);
+            }
+            PollEvent::Main(MainEvent::ConfigChanged { .. }) => {
+                // Redraw from app.config(); keeper and lifecycle are untouched.
+            }
+            PollEvent::Main(MainEvent::Destroy) => destroyed = true,
+            _ => {}
+        });
+        back.drain_callbacks();
+    }
+    back.close().unwrap();
+    keeper.destroy_all();
+}
+```
+
+The primitives stay independently usable: nothing forces them through a
+single aggregate host object. A future Decompose-rs layer can receive the
+`LifecycleRegistry`, `StateKeeper`, `InstanceKeeper`, and `BackDispatcher`
+values directly, without Android or JNI types leaking into its core.
+
+## Back registration synchronization
+
+After changing registrations through `dispatcher_mut`, the caller calls
+`synchronize_enabled_state()` so platform registration follows whether Rust
+has an enabled handler. Explicit synchronization is deliberate: the core
+dispatcher has no enabled-change listener, and automatically unregistering
+mid-gesture would be unsafe — a disable requested during a claimed gesture is
+instead deferred until that gesture receives invoke or cancel. `drain_callbacks`
+also reconciles state after each batch, so the common event-loop shape above
+stays correct without extra calls.
+
+## Packaging with Cargo metadata
+
+The application package (not the `essenty-android` dependency) declares its
+`NativeActivity` entry. Verified with `cargo-apk2`, whose `config_changes`
+field generates the manifest declaration without a hand-maintained manifest:
+
+```toml
+[lib]
+crate-type = ["cdylib"]
+
+[package.metadata.android]
+package = "dev.example.app"
+build_targets = ["aarch64-linux-android"]
+
+[package.metadata.android.sdk]
+min_sdk_version = 23
+target_sdk_version = 37
+
+[[package.metadata.android.application.activity]]
+name = "android.app.NativeActivity"
+label = "Example"
+exported = true
+config_changes = "orientation|screenSize|smallestScreenSize|screenLayout|uiMode|density|fontScale|locale|layoutDirection"
+
+[[package.metadata.android.application.activity.meta_data]]
+name = "android.app.lib_name"
+value = "example"
+
+[[package.metadata.android.application.activity.intent_filter]]
+actions = ["android.intent.action.MAIN"]
+categories = ["android.intent.category.LAUNCHER"]
+```
+
+Use the array-of-tables form (`[[...activity]]`) shown here; the singular
+table form (`[...]`) is accepted by some tool versions for a single activity.
+`cargo-apk` (rust-mobile) shares the `[package.metadata.android]` root but its
+activity table shape varies by version — consult that tool's docs rather than
+assuming identical syntax. The harness build proves the `cargo-apk2` form above
+produces a working manifest with the exact `configChanges` string.
+
+## Minimum supported API
+
+The tested floor is `min_sdk_version = 23`, used by the runtime harness. All
+modern back paths are runtime-selected (`PredictiveCallback` on API 34+,
+`InvokedCallback` on API 33, `NativeKey` below), so older platforms use the
+key fallback instead of raising the minimum. Lower API levels are untested;
+do not lower the floor without a runtime check.
+
+## Platform semantic matrix
+
+| Essenty semantic | Android implementation | Limitation |
+|---|---|---|
+| Lifecycle | NativeActivity event loop via `android-activity` | No AndroidX owner attachment timing |
+| StateKeeper | Native opaque saved-state bytes, versioned envelope | Restores only serialized bytes, on recreation or process relaunch |
+| InstanceKeeper | Same-thread local keeper across handled config changes | Identity lost on actual Activity recreation and on process death, by design |
+| BackHandler | Direct `android.window` platform callbacks | Shell-injected gestures report `progress == 0.0`; natural gesture curves need interactive verification |
+
+## Error handling, unsafe, and binary notes
+
+Setup and teardown failures surface as typed `AndroidBackError` values
+readable via `take_error` (async registration) or returned from `close`;
+state failures surface as `NativeStateError` or `NativeConfigError`. No
+message is a bare "JNI failed": each carries the failing operation plus the
+platform detail. No panic crosses an FFI boundary: the Java proxy callback
+catches Rust panics and clears a pending Java exception after failures.
+
+Unsafe blocks are confined to the Android-only back platform adapter and the
+host configuration reader. Each documents its invariant: the `JavaVM` pointer
+comes from `android-activity` and is only used to attach the calling thread;
+the Activity raw pointer is wrapped in a local that never escapes its closure;
+the proxy and dispatcher `GlobalRef`s are owned until unregister succeeds, and
+a failed unregister quarantines the registration for retry instead of freeing
+live callback state.
+
+Binary baseline (debug, unoptimized): the harness APK totals ~40.2 MB, of
+which ~40.2 MB is the debug Rust `.so` and `classes.dex` is 612 bytes — the
+proxy/DEX support ships inside the existing library with no consumer-visible
+JVM code beyond the NativeActivity shim. No with/without split was measured;
+treat this as a baseline, not a regression gate.
 
 ## Verification boundary
 
 - Host tests cover the state envelope, legacy format, corruption, version,
-  empty state, and preservation of unconsumed values.
+  empty state, preservation of unconsumed values, the config-category model
+  (baseline/extended partition, manifest round-trip, warning content), and
+  back bridge mapping.
 - Both `aarch64-linux-android` and `x86_64-linux-android` compile with the
-  `native-activity` feature.
-- API 36.1 runtime harness exercised lifecycle start/resume/destroy, orientation,
-  locale, UI night mode, display resize, and 50 consecutive configuration
-  changes while retaining one actual non-`Send` `Rc` value. It observed one
-  `android_main`, one keeper identity, one retained object identity, no destroy
-  during the changes, then one final destruction/drop.
-- The integrated API 36.1 back adapter attached, received a cancelled
-  predictive-back gesture, and unregistered on close. The shell-driven gesture
-  did not produce an invoke callback. No API 33 AVD was available, and no
-  separate API 34 run was made; the earlier isolated API 36 PoC remains
-  separate evidence.
-- Process relaunch after process death, API <33 runtime back, and API 33 runtime
-  back were not exercised. The emulator and `adb` were available at the
-  configured SDK path; there was no API 33 AVD.
+  `native-activity` feature; clippy is clean for host and both ABIs.
+- API 36.1 runtime harness exercised lifecycle start/resume/destroy,
+  portrait/landscape rotation handled in place with unchanged thread, keeper,
+  and retained `Rc` identity, plus locale, UI night mode, and display resize
+  from the earlier run and 50 consecutive configuration changes with one
+  final destruction/drop.
+- API 36.1 process-death run: backgrounding saved a 57-byte envelope,
+  `adb shell am kill` terminated the process, and relaunch delivered the
+  exact marker bytes to a fresh process, thread, and keeper.
+- API 36.1 integrated back adapter: attach, a short swipe producing start,
+  five progressed callbacks (progress `0.0`, left edge, touch coordinates),
+  and cancel; a long swipe committing to invoke, which finished the host;
+  teardown destroyed the keeper exactly once with no crash, and a
+  post-destroy swipe produced zero Rust dispatches.
+- Not exercised: API 33 runtime (image download stalled for 10 minutes with
+  zero bytes; no AVD provisioned), API 34 phone runtime (only the XR headset
+  image is installed), pre-33 runtime (no runnable image; empty stubs only),
+  naturally varying gesture progress (shell input reports `0.0`; constructed
+  `BackEvent` mapping stays verified), and a dedicated 50–100 gesture-cycle
+  stress (the harness exits on invoke; 50 config events showed one stable
+  back attachment and observer count).
+
+## CI strategy
+
+The cross-target compile matrix (all 21 targets plus both Android ABIs with
+the `native-activity` feature) stays fast, non-flaky, and mandatory. Emulator
+validation remains manual and periodic: one modern-API smoke run covering
+launch, rotation, background/kill/relaunch, and a cancel plus commit back
+gesture, using the `experiments/android-instance-keeper` harness procedure.
+No multi-emulator CI matrix is added — it would be slow and flaky for gesture
+and process-lifecycle timing. Compile-only checks cover the API matrix; deeper
+emulator runs happen on demand for back-adapter or lifecycle changes.
 
 The dynamic proxy callback count is exposed for debug/test instrumentation. The
 PoC's callback counts were observations, not a JNI performance benchmark.

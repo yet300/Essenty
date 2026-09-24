@@ -4,7 +4,7 @@
 
 | Integration | Origin | Status |
 |---|---|---|
-| NativeActivity lifecycle, saved state, declared configuration retention; direct `android.window` back callbacks | Rust extension | Implemented/compile-checked; API 36.1 lifecycle/configuration runtime-tested; integrated API 36.1 back adapter attached/cancelled/unregistered; API 33 runtime unavailable |
+| NativeActivity lifecycle, saved state, declared configuration retention, host config diagnostic; direct `android.window` back callbacks | Rust extension | Implemented/compile-checked; API 36.1 lifecycle/configuration/process-death runtime-tested; integrated API 36.1 back adapter attach/cancel/invoke/teardown runtime-tested; API 33 and pre-33 runtime unavailable |
 | Browser lifecycle, history, storage | Rust extension | Implemented; WASM compile-tested, browser runtime tests planned |
 | macOS application lifecycle | Rust extension | Implemented; runtime-tested |
 | UIKit/WatchKit application lifecycle | Rust extension | Implemented; compile-tested |
@@ -101,12 +101,12 @@ Upstream references: [dispatcher](https://github.com/arkivanov/Essenty/blob/c4f1
 
 | Behavior | Status | Rust evidence / decision |
 |---|---|---|
-| Android lifecycle | IMPLEMENTED; API 36.1 runtime exercised | `NativeActivityLifecycle` observes `android-activity` events. This is a NativeActivity adapter and does not mirror AndroidX owner attachment timing. |
-| Android saved state | IMPLEMENTED; API 36.1 recreation runtime-tested | `NativeActivityState` uses a versioned, checksummed binary envelope and native `StateLoader`/`StateSaver`; old `EST1` snapshots remain readable. A 57-byte envelope and exact registered marker survived orientation recreation. Process relaunch was not tested. |
+| Android lifecycle | IMPLEMENTED; API 36.1 runtime exercised | `NativeActivityLifecycle` observes `android-activity` events. This is a NativeActivity adapter and does not mirror AndroidX owner attachment timing. Handled config changes do not move the Essenty lifecycle. |
+| Android saved state | IMPLEMENTED; API 36.1 recreation and process-death runtime-tested | `NativeActivityState` uses a versioned, checksummed binary envelope and native `StateLoader`/`StateSaver`; old `EST1` snapshots remain readable. A 57-byte envelope and exact registered marker survived orientation recreation and an `am kill` relaunch. |
 | Android InstanceKeeper core | IMPLEMENTED | The core keeper remains local and `Rc`-based. |
-| NativeActivity configuration retention | RUNTIME VERIFIED on API 36.1 | In-place handled changes preserved one native thread, keeper, and retained object through 50 events; final Activity destroy dropped it once. The app must declare Cargo manifest metadata. |
+| NativeActivity configuration retention | RUNTIME VERIFIED on API 36.1 | In-place handled changes preserved one native thread, keeper, and retained object through 50 events plus rotation spot-checks; final Activity destroy dropped it once. The app must declare Cargo manifest metadata; `native_config` diagnoses the declaration. |
 | Arbitrary Activity recreation retention | UNSUPPORTED for non-`Send` values | New host threads cannot receive the prior local `Rc` values. StateKeeper is the serialization boundary. |
-| Android back | IMPLEMENTED; API 33 runtime unavailable | API <33 uses NativeActivity input; API 33 uses `OnBackInvokedCallback`; API 34+ uses `OnBackAnimationCallback`. Integrated API 36.1 adapter registration, cancelled gesture, and unregister were runtime exercised; invoke was not. No API 33 AVD was available. |
+| Android back | IMPLEMENTED; API 33 and pre-33 runtime unavailable | API <33 uses NativeActivity input; API 33 uses `OnBackInvokedCallback`; API 34+ uses `OnBackAnimationCallback`. Integrated API 36.1 adapter verified for registration, cancelled gesture, committed invoke, teardown, and post-destroy silence. No API 33 or pre-33 runnable image was available. |
 | Apple application lifecycle | INTENTIONALLY DIFFERENT | macOS, UIKit and WatchKit adapters observe process-wide notifications with `objc2`; they do not model individual scenes. macOS synthetic notification delivery and observer removal were runtime-tested; UIKit and WatchKit were compile-tested only. |
 | Browser lifecycle | INTENTIONALLY DIFFERENT | Visibility and `pagehide`/`pageshow` listeners are wired. A persisted `pagehide` leaves the registry restorable; `persisted_page_hide_preserves_lifecycle_for_bfcache` covers the mapping. Browser delivery remains untested. |
 | Browser back | NOT APPLICABLE | The opt-in `BrowserHistoryBack` listener forwards `popstate` after history navigation and cannot cancel it. It does not claim upstream Android back semantics. |

@@ -31,10 +31,12 @@ objects verified progress, edge, and touch-coordinate transport. Real shell
 gestures did not establish naturally varying progress values.
 
 The production adapter has since moved into `crates/essenty-android`. The
-integrated adapter was attached on an API 36.1 emulator, received a cancelled
-predictive-back gesture, and unregistered during teardown. The shell gesture
-did not verify its invoke callback. API 33 runtime behavior remains unverified
-because no API 33 emulator image was installed.
+integrated adapter was exercised on an API 36.1 emulator: attach, a short
+swipe producing start/progressed/cancel, a long swipe committing to invoke
+(which finished the host), teardown destroying the keeper exactly once with
+no crash, and a post-destroy swipe producing zero Rust dispatches. API 33
+runtime behavior remains unverified because the API 33 image download
+stalled and no AVD was provisioned.
 
 ## Dependency decision
 
@@ -73,7 +75,10 @@ decoding. It has host corruption/round-trip tests and Android target compile
 checks. The API 36.1 harness also forced one orientation recreation with a
 StateKeeper marker: Android delivered a 57-byte saved envelope, the replacement
 `android_main` ran with a new thread and keeper, and the exact marker bytes were
-restored. Process relaunch after process death was not exercised.
+restored. A further run verified real process death: after backgrounding, `adb
+shell am kill` terminated the process, and relaunch delivered the exact marker
+bytes to a fresh process, thread, and keeper. Force-stop is intentionally not
+used as a test because Android discards restoration state for it.
 
 The adapter intentionally reports **Android Essenty semantic behavior**. It
 does not claim implementation identity with upstream's AndroidX owners. The
@@ -115,27 +120,45 @@ need for that variant. It would fragment the API and impose `Send`/`Sync`
 constraints on retained components, unlike Essenty's local owner model. Do not
 add it without a concrete application requirement and independent design.
 
-The platform can query the hosting Activity's `ActivityInfo.configChanges`
-through PackageManager/JNI, so a debug validation API is feasible. It is not
-implemented in this change. Missing flags reduce the retention guarantee and
-lead to normal destruction; they do not justify unsafe transfer or undefined
-behavior.
+The platform queries the hosting Activity's `ActivityInfo.configChanges`
+through `PackageManager`/JNI in `essenty_android::native_config`. The
+`NativeConfigCategory` model is the single source of truth for the baseline
+and extended manifest strings; `inspect_host_configuration` returns a
+`HostConfigurationReport` with declared, missing-baseline,
+missing-extended, and unknown-bit sets plus a one-shot retention warning.
+Missing flags reduce the retention guarantee and lead to normal destruction;
+they do not justify unsafe transfer or undefined behavior.
 
 ## Verification gaps
 
 | Capability | Current evidence | Remaining check |
 |---|---|---|
-| Lifecycle | API 36.1 NativeActivity runtime start/resume/config/destroy and orientation recreation | API 33 runtime; process relaunch |
-| StateKeeper | Host codec tests; API 36.1 saved envelope sent and marker restored after orientation recreation | Process relaunch after process death |
+| Lifecycle | API 36.1 NativeActivity runtime start/resume/config/destroy, rotation in place, orientation recreation, and background/save/kill/relaunch | Exact per-state transition log against the Essenty state machine on more OS versions |
+| StateKeeper | Host codec tests; API 36.1 saved envelope restored after orientation recreation and after real process death (`am kill` + relaunch) | Force-stop correctly discards state and is not a valid test; no further check needed |
 | InstanceKeeper core | Implemented with local `Rc` | Core is unchanged |
-| NativeActivity config retention | API 36.1 runtime; 50 config events, same thread/keeper/value, one final drop | Other OS/API combinations and unlisted recreation are outside guarantee |
-| Back below 33 | Android target compile | Runtime on older supported API |
-| API 33 back | Callback interface selected and compiled | API 33 emulator registration/invocation; no image installed |
-| API 34+ back | API 36 PoC runtime; integrated API 36.1 adapter attached, cancelled gesture, and unregister verified | Integrated invoke and separate API 34 runtime run |
-| Natural gesture progress | Synthetic `BackEvent` mapping verified; shell gesture delivered start/progress/cancel | Naturally varying progress and integrated invoke |
-| Adapter stress | 50 config events showed one back attachment and stable lifecycle observer count | 50–100 predictive gesture/recreation cycles |
+| NativeActivity config retention | API 36.1 runtime; 50 config events plus rotation spot-checks, same thread/keeper/value, one final drop | Other OS/API combinations and unlisted recreation are outside guarantee |
+| Host diagnostic | Host unit-tested; compiles for both Android ABIs | One live-device readout print from a device run |
+| Back below 33 | Android target compile | Runtime on older supported API; no runnable pre-33 image in this environment |
+| API 33 back | Callback interface selected and compiled | API 33 emulator registration/invocation; image download stalled, no AVD provisioned |
+| API 34+ back | API 36 PoC runtime; integrated API 36.1 adapter attach, cancel, committed invoke, teardown, and post-destroy silence verified | Separate API 34 phone run; only the XR headset image is installed |
+| Natural gesture progress | Synthetic `BackEvent` mapping verified; shell gestures deliver start/progress/cancel at `progress == 0.0` | Naturally varying progress needs an interactive gesture |
+| Adapter stress | 50 config events showed one back attachment and stable lifecycle observer count | 50–100 gesture cycles need a non-exiting stress harness |
 
 The Android SDK was available at `~/Library/Android/sdk`; `adb` was invoked by
-its full path. The configured API 36.1 emulator was used. There was no API 33
-AVD available; an API 33 system image was not needed for the API 36 integrated
-adapter run.
+its full path. The configured API 36.1 emulator was used. API 33 provisioning
+was attempted (`sdkmanager` install of the API 33 Google-APIs ARM image) but
+stalled with zero bytes in ten minutes, so no API 33 AVD was created.
+
+## Decompose-rs readiness
+
+A future Decompose-rs layer can be built on the four primitives without
+architectural blockers. It receives the `LifecycleRegistry`,
+`StateKeeper`/`NativeActivityState` keeper, local `InstanceKeeper`, and
+`BackDispatcher` values directly — all thread-confined Rust types with no
+Android or JNI types in their signatures. No global runtime singleton exists;
+each `android_main` invocation owns its instances. No `Send`/`Sync` is
+required globally; the back adapter's internal channel moves plain data to the
+owning thread. The known integration work is product-level, not architectural:
+drive the lifecycle from `poll_events`, persist through `SaveState`,
+synchronize back registration after handler changes, and declare
+`configChanges`. No speculative abstraction is added for it.
