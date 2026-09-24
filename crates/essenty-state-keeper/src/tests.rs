@@ -119,7 +119,6 @@ fn encode_failure_surfaces_at_save() {
     let err = keeper.save().unwrap_err();
     assert_eq!(err, StateKeeperError::Encode { key: "bad".to_owned(), reason: "boom".to_owned() });
 }
-
 #[test]
 fn unconsumed_restored_values_survive_another_save() {
     let mut keeper = StateKeeper::with_restored(BTreeMap::from([
@@ -133,4 +132,53 @@ fn unconsumed_restored_values_survive_another_save() {
     assert_eq!(saved.get("old"), Some(&vec![1]));
     assert_eq!(saved.get("replaced"), Some(&vec![9]));
     assert!(!saved.contains_key("consumed"));
+}
+
+#[test]
+fn optional_provider_returning_none_skips_key_and_preserves_restored() {
+    let mut keeper = StateKeeper::with_restored(BTreeMap::from([("k".to_owned(), vec![7])]));
+    keeper.register_optional("k", || None).unwrap();
+    keeper.register_optional("fresh", || None).unwrap();
+    let saved = keeper.save().unwrap();
+    // Skipped provider preserves the unconsumed restored value.
+    assert_eq!(saved.get("k"), Some(&vec![7]));
+    assert!(!saved.contains_key("fresh"));
+    assert_eq!(keeper.consume_bytes("k"), Some(vec![7]));
+}
+
+#[test]
+fn optional_provider_returning_bytes_replaces_restored() {
+    let mut keeper = StateKeeper::with_restored(BTreeMap::from([("k".to_owned(), vec![7])]));
+    keeper.register_optional("k", || Some(vec![9])).unwrap();
+    assert_eq!(keeper.save().unwrap().get("k"), Some(&vec![9]));
+}
+
+#[test]
+fn optional_value_provider_skips_and_replaces() {
+    let mut keeper = StateKeeper::with_restored(BTreeMap::from([(
+        "v".to_owned(),
+        serde_json::to_vec(&Counter { value: 3 }).unwrap(),
+    )]));
+    keeper.register_optional_value("v", || None::<Counter>, json_encode).unwrap();
+    keeper.register_optional_value("w", || Some(Counter { value: 5 }), json_encode).unwrap();
+    let saved = keeper.save().unwrap();
+    assert_eq!(saved.get("v"), Some(&serde_json::to_vec(&Counter { value: 3 }).unwrap()));
+    let mut restored = StateKeeper::with_restored(saved);
+    let kept: Option<Counter> = restored.consume_value("v", json_decode).unwrap();
+    assert_eq!(kept, Some(Counter { value: 3 }));
+    let fresh: Option<Counter> = restored.consume_value("w", json_decode).unwrap();
+    assert_eq!(fresh, Some(Counter { value: 5 }));
+}
+
+#[test]
+fn optional_duplicate_registration_is_rejected() {
+    let mut keeper = StateKeeper::new();
+    keeper.register_optional("k", || None).unwrap();
+    assert_eq!(
+        keeper.register_optional("k", || None).unwrap_err(),
+        StateKeeperError::DuplicateKey("k".to_owned())
+    );
+    assert!(keeper.is_registered("k"));
+    assert!(keeper.has_provider("k"));
+    assert!(!keeper.is_registered("other"));
 }

@@ -3,7 +3,7 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 use std::collections::BTreeMap;
 
-type Provider = Box<dyn Fn() -> Result<Vec<u8>, StateKeeperError>>;
+type Provider = Box<dyn Fn() -> Result<Option<Vec<u8>>, StateKeeperError>>;
 
 /// Pure Rust state keeper.
 ///
@@ -49,6 +49,15 @@ impl StateKeeper {
         self.providers.contains_key(key)
     }
 
+    /// Returns `true` if a provider is registered under `key`.
+    ///
+    /// Alias of [`StateKeeper::has_provider`] using the upstream
+    /// `StateKeeper.isRegistered` name.
+    #[must_use]
+    pub fn is_registered(&self, key: &str) -> bool {
+        self.has_provider(key)
+    }
+
     /// Returns `true` if unconsumed restored state remains under `key`.
     #[must_use]
     pub fn has_consumable(&self, key: &str) -> bool {
@@ -80,7 +89,7 @@ impl StateKeeper {
         if self.providers.contains_key(key) {
             return Err(StateKeeperError::DuplicateKey(key.to_owned()));
         }
-        self.providers.insert(key.to_owned(), Box::new(move || Ok(provider())));
+        self.providers.insert(key.to_owned(), Box::new(move || Ok(Some(provider()))));
         Ok(())
     }
 
@@ -111,7 +120,64 @@ impl StateKeeper {
             owned.clone(),
             Box::new(move || {
                 encode(&supplier())
+                    .map(Some)
                     .map_err(|reason| StateKeeperError::Encode { key: owned.clone(), reason })
+            }),
+        );
+        Ok(())
+    }
+
+    /// Registers a byte-producing provider that may decline to supply state.
+    ///
+    /// This mirrors the upstream nullable supplier (`supplier: () -> T?`):
+    /// returning `None` skips the key at [`StateKeeper::save`] time, leaving
+    /// any unconsumed restored value under the same key intact.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StateKeeperError::DuplicateKey`] if `key` is taken.
+    pub fn register_optional(
+        &mut self,
+        key: &str,
+        provider: impl Fn() -> Option<Vec<u8>> + 'static,
+    ) -> Result<(), StateKeeperError> {
+        if self.providers.contains_key(key) {
+            return Err(StateKeeperError::DuplicateKey(key.to_owned()));
+        }
+        self.providers.insert(key.to_owned(), Box::new(move || Ok(provider())));
+        Ok(())
+    }
+
+    /// Registers a [`serde::Serialize`] provider that may decline to supply
+    /// state, returning `None` from `supplier` to skip the key at save time.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StateKeeperError::DuplicateKey`] if `key` is taken.
+    pub fn register_optional_value<T>(
+        &mut self,
+        key: &str,
+        supplier: impl Fn() -> Option<T> + 'static,
+        encode: impl Fn(&T) -> Result<Vec<u8>, String> + 'static,
+    ) -> Result<(), StateKeeperError>
+    where
+        T: Serialize + 'static,
+    {
+        if self.providers.contains_key(key) {
+            return Err(StateKeeperError::DuplicateKey(key.to_owned()));
+        }
+        let owned = key.to_owned();
+        self.providers.insert(
+            owned.clone(),
+            Box::new(move || {
+                supplier()
+                    .map(|value| {
+                        encode(&value).map_err(|reason| StateKeeperError::Encode {
+                            key: owned.clone(),
+                            reason,
+                        })
+                    })
+                    .transpose()
             }),
         );
         Ok(())
@@ -155,8 +221,10 @@ impl StateKeeper {
     }
 
     /// Saves unconsumed restored entries and registered providers into a
-    /// deterministic (key-ordered) map. Providers replace restored values
-    /// with the same key. The first encoding failure
+    /// deterministic (key-ordered) map. Providers returning bytes replace
+    /// restored values with the same key; providers returning `None` (see
+    /// [`StateKeeper::register_optional`]) skip the key, preserving any
+    /// unconsumed restored value. The first encoding failure
     /// aborts the save with [`StateKeeperError::Encode`].
     ///
     /// # Errors
@@ -165,7 +233,9 @@ impl StateKeeper {
     pub fn save(&self) -> Result<BTreeMap<String, Vec<u8>>, StateKeeperError> {
         let mut out = self.restored.clone();
         for (key, provider) in &self.providers {
-            out.insert(key.clone(), provider()?);
+            if let Some(bytes) = provider()? {
+                out.insert(key.clone(), bytes);
+            }
         }
         Ok(out)
     }
