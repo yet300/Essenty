@@ -17,7 +17,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-pc-windows-msvc
-      - uses: rust-lang/rust-cache@v2
+      - uses: Swatinem/rust-cache@v2
       - run: cargo test --workspace --target x86_64-pc-windows-msvc
 
   windows-arm64-check:
@@ -28,5 +28,5 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-pc-windows-msvc
-      - uses: rust-lang/rust-cache@v2
+      - uses: Swatinem/rust-cache@v2
       - run: cargo check --workspace --target aarch64-pc-windows-msvc

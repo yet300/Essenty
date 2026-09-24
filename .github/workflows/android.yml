@@ -21,7 +21,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
-      - uses: rust-lang/rust-cache@v2
+      - uses: Swatinem/rust-cache@v2
       # `cargo check` needs only target std; runtime tests need an emulator.
       - run: cargo check --workspace --target ${{ matrix.target }}
       - run: cargo check -p essenty-android --features native-activity --target ${{ matrix.target }}

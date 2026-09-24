@@ -27,7 +27,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
-      - uses: rust-lang/rust-cache@v2
+      - uses: Swatinem/rust-cache@v2
       - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
   test:
@@ -36,7 +36,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - uses: rust-lang/rust-cache@v2
+      - uses: Swatinem/rust-cache@v2
       - run: cargo test --workspace --all-features
 
   docs:
@@ -45,7 +45,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - uses: rust-lang/rust-cache@v2
+      - uses: Swatinem/rust-cache@v2
       - run: cargo doc --workspace --no-deps
         env:
           RUSTDOCFLAGS: -D warnings

@@ -17,7 +17,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-unknown-linux-gnu
-      - uses: rust-lang/rust-cache@v2
+      - uses: Swatinem/rust-cache@v2
       - run: cargo test --workspace --target x86_64-unknown-linux-gnu
 
   linux-aarch64-gnu-check:
@@ -28,7 +28,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-unknown-linux-gnu
-      - uses: rust-lang/rust-cache@v2
+      - uses: Swatinem/rust-cache@v2
       - name: Install cross linker
         run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
       - run: cargo check --workspace --target aarch64-unknown-linux-gnu
@@ -44,6 +44,6 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
-      - uses: rust-lang/rust-cache@v2
+      - uses: Swatinem/rust-cache@v2
       - run: rustup target add ${{ matrix.target }}
       - run: cargo check --workspace --target ${{ matrix.target }}
