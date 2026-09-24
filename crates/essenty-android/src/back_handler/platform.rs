@@ -1,4 +1,4 @@
-//! Direct `android.window` callback integration for NativeActivity hosts.
+//! Direct `android.window` callback integration for `NativeActivity` hosts.
 
 #![allow(unsafe_code)]
 
@@ -26,7 +26,7 @@ use crate::AndroidBackBridge;
 /// Runtime strategy selected for this Android device.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum AndroidBackStrategy {
-    /// `KEYCODE_BACK` delivered by the NativeActivity input queue.
+    /// `KEYCODE_BACK` delivered by the `NativeActivity` input queue.
     NativeKey,
     /// `OnBackInvokedCallback`, introduced in API 33.
     InvokedCallback,
@@ -78,7 +78,10 @@ struct Registration {
     proxy: DynamicProxy,
 }
 
-static UNREGISTER_RETRY: OnceLock<Mutex<Vec<Arc<Mutex<Option<Registration>>>>>> = OnceLock::new();
+type RegistrationRef = Arc<Mutex<Option<Registration>>>;
+type RegistrationRetries = Mutex<Vec<RegistrationRef>>;
+
+static UNREGISTER_RETRY: OnceLock<RegistrationRetries> = OnceLock::new();
 
 impl std::fmt::Debug for Registration {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -100,7 +103,7 @@ impl Registration {
     }
 }
 
-/// NativeActivity back adapter. Platform callbacks only enqueue events; the
+/// `NativeActivity` back adapter. Platform callbacks only enqueue events; the
 /// caller drains them on its Rust event-loop thread into the owned dispatcher.
 ///
 /// Registration/unregistration are always posted to Android's Java main
@@ -187,9 +190,12 @@ impl AndroidBackHandler {
     }
 
     /// Unregisters on the Java main thread and waits for completion. Call this
-    /// from the NativeActivity Rust event-loop thread, never from a Java
+    /// from the `NativeActivity` Rust event-loop thread, never from a Java
     /// callback. On failure, the proxy is quarantined for a later cleanup
     /// attempt so Java cannot call freed Rust handler state.
+    ///
+    /// # Errors
+    /// Returns an error if a gesture is still active or Java fails to unregister.
     pub fn close(&mut self) -> Result<(), AndroidBackError> {
         if self.bridge.dispatcher().has_active_gesture() {
             return Err(AndroidBackError {
@@ -219,6 +225,7 @@ impl AndroidBackHandler {
             let outcome = match outcome {
                 Ok(()) => {
                     registered.store(false, Ordering::Release);
+                    remove_quarantined(&registration);
                     Ok(())
                 }
                 Err(cause) => {
@@ -317,7 +324,7 @@ impl AndroidBackHandler {
         count
     }
 
-    /// Routes legacy NativeActivity input. Modern callback strategies leave
+    /// Routes legacy `NativeActivity` input. Modern callback strategies leave
     /// `KEYCODE_BACK` unhandled so Android cannot dispatch the same press twice.
     pub fn handle_legacy_back<F>(
         &mut self,
@@ -352,6 +359,13 @@ impl Drop for AndroidBackHandler {
         if self.closed || self.strategy == AndroidBackStrategy::NativeKey {
             return;
         }
+        if self.bridge.dispatcher().has_active_gesture() {
+            if let Ok(mut retries) = UNREGISTER_RETRY.get_or_init(|| Mutex::new(Vec::new())).lock()
+            {
+                retries.push(Arc::clone(&self.registration));
+            }
+            return;
+        }
         uninstall(
             &self.app,
             Arc::clone(&self.registration),
@@ -361,6 +375,7 @@ impl Drop for AndroidBackHandler {
     }
 }
 
+#[allow(clippy::too_many_lines)]
 fn install(
     app: &AndroidApp,
     sender: mpsc::Sender<PlatformEvent>,
@@ -402,10 +417,14 @@ fn install(
             };
             let callback_sender = sender.clone();
             let callback_waker = waker.clone();
+            let callback_app = java_app.clone();
+            let callback_registration = Arc::clone(&registration);
+            let callback_error = Arc::clone(&error);
+            let callback_registered = Arc::clone(&registered);
             let proxy = DynamicProxy::build(
                 env,
                 &LoaderContext::None,
-                &[interface],
+                [interface],
                 move |env, method, args| {
                     let callback = catch_unwind(AssertUnwindSafe(
                         || -> Result<JObject<'_>, jni::errors::Error> {
@@ -467,7 +486,19 @@ fn install(
                                     return Ok(JObject::null());
                                 }
                             };
-                            let _ = callback_sender.send(event);
+                            let is_terminal =
+                                matches!(event, PlatformEvent::Cancelled | PlatformEvent::Invoked);
+                            if callback_sender.send(event).is_err() && is_terminal {
+                                // The Rust receiver was dropped during teardown.
+                                // Keep the proxy alive through the platform's
+                                // terminal gesture callback, then unregister.
+                                uninstall(
+                                    &callback_app,
+                                    Arc::clone(&callback_registration),
+                                    Arc::clone(&callback_error),
+                                    Arc::clone(&callback_registered),
+                                );
+                            }
                             callback_waker.wake();
                             Ok(JObject::null())
                         },
@@ -531,7 +562,10 @@ fn uninstall(
             Ok::<_, jni::errors::Error>(())
         });
         match result {
-            Ok(()) => registered.store(false, Ordering::Release),
+            Ok(()) => {
+                registered.store(false, Ordering::Release);
+                remove_quarantined(&registration);
+            }
             Err(cause) => {
                 registered.store(true, Ordering::Release);
                 clear_pending_java_exception();
@@ -551,6 +585,13 @@ fn uninstall(
             }
         }
     }));
+}
+
+fn remove_quarantined(registration: &Arc<Mutex<Option<Registration>>>) {
+    let Some(retries) = UNREGISTER_RETRY.get() else { return };
+    if let Ok(mut retries) = retries.lock() {
+        retries.retain(|pending| !Arc::ptr_eq(pending, registration));
+    }
 }
 
 fn clear_pending_java_exception() {

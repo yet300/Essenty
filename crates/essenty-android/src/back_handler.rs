@@ -4,7 +4,7 @@ use essenty_back_handler::{BackDispatcher, GesturePosition};
 /// Android-only `AndroidBackHandler` owns direct
 /// platform callback registration.
 ///
-/// The NativeActivity proxy adapter and host tests both use the same mapping
+/// The `NativeActivity` proxy adapter and host tests both use the same mapping
 /// methods. This type itself remains platform agnostic and host-testable.
 #[derive(Debug, Default)]
 pub struct AndroidBackBridge {
