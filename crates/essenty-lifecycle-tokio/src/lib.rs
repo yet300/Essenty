@@ -136,7 +136,7 @@
 //! This crate never creates a runtime and never creates a `LocalSet`.
 //! [`LifecycleScope::new`] uses [`tokio::runtime::Handle::current`] and panics
 //! outside a runtime; [`LifecycleScope::try_new`] returns a typed
-//! [`ScopeError`](crate::ScopeError) instead, and
+//! [`ScopeError`] instead, and
 //! [`LifecycleScope::with_handle`] takes an explicit handle. The `Send` repeat
 //! spawns children on the ambient runtime via [`tokio::spawn`]; the local
 //! repeat and [`spawn_local`](LifecycleScope::spawn_local) require an ambient

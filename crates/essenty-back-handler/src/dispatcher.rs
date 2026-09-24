@@ -199,13 +199,20 @@ impl BackDispatcher {
     /// gesture, it receives cancellation; a later progress event may choose
     /// another handler. Returns `true` if one existed.
     pub fn unregister(&mut self, id: u64) -> bool {
+        if !self.entries.contains_key(&id) {
+            return false;
+        }
         if self.active_gesture == Some(id) {
             self.active_gesture = None;
             self.dispatch_to(id, BackEvent::cancelled(), true);
         }
-        let removed = self.entries.remove(&id).is_some();
+        // The cancellation delivery above may already have removed the entry
+        // through a queued `BackCommands::unregister(id)` (including
+        // self-unregistration from the Cancelled callback itself). Existence
+        // was verified up front, so the return value stays `true` either way.
+        let _ = self.entries.remove(&id);
         self.notify_enabled_changed();
-        removed
+        true
     }
 
     /// Enables or disables a callback. Returns `true` if `id` exists.

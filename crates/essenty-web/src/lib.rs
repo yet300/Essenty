@@ -2,7 +2,8 @@
 //!
 //! Bootstrap scope: host-compilable, pure Rust mapping logic plus narrow
 //! `wasm32`-only bindings. Browser APIs (`wasm-bindgen`, `js-sys`,
-//! `web-sys`) are used exclusively inside this crate and never leak into the
+//! `web-sys`) are used exclusively inside this crate, are gated behind
+//! `cfg(target_arch = "wasm32")` dependencies, and never leak into the
 //! core crates.
 //!
 //! Integration surfaces:

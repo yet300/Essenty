@@ -321,3 +321,22 @@ fn fallback_after_owner_removal_replays_original_start_event() {
     assert_eq!(log[2].1, BackEvent::started_with(start_position));
     assert_eq!(log[3].1, BackEvent::progressed_with(0.4, progress_position));
 }
+
+#[test]
+fn unregister_gesture_owner_that_self_removes_on_cancel_returns_true() {
+    let mut dispatcher = BackDispatcher::new();
+    let owner_id = Rc::new(RefCell::new(u64::MAX));
+    let owner_probe = Rc::clone(&owner_id);
+    let handle = dispatcher.register_reentrant(0, true, move |event, commands| {
+        if event.phase == BackPhase::Cancelled {
+            commands.unregister(*owner_probe.borrow());
+        }
+    });
+    *owner_id.borrow_mut() = handle.id();
+    assert!(dispatcher.predictive_start());
+    // The Cancelled callback above queues self-removal; the outer unregister
+    // must still report that the entry existed.
+    assert!(dispatcher.unregister(handle.id()));
+    assert!(!dispatcher.unregister(handle.id()));
+    assert_eq!(dispatcher.handler_count(), 0);
+}
