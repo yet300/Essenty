@@ -23,8 +23,8 @@ async fn stop_child(child: &mut Option<JoinHandle<()>>) {
     }
 }
 
-/// Guard that aborts the child task if the [`repeat_on_lifecycle`] future is
-/// dropped (external cancellation) before it could be awaited.
+/// Guard that aborts the child task if the repeat future is dropped
+/// (external cancellation) before it could be awaited.
 ///
 /// Dropping a `JoinHandle` detaches the task; without this guard an externally
 /// cancelled repeat would leak a running child and its lifecycle subscription
@@ -51,9 +51,12 @@ impl Drop for AbortOnDrop {
 /// The returned future is `!Send` (it owns the single-threaded lifecycle
 /// handle and its subscription) and must be polled on the lifecycle-owning
 /// thread — for example by awaiting it directly on a current-thread runtime
-/// or inside a `LocalSet`. Child block futures are `Send + 'static` because
-/// Tokio workers execute them via [`tokio::spawn`]; the factory itself may
-/// capture `!Send` data.
+/// or inside a `LocalSet`. For thread-local (`!Send`) block futures use
+/// [`repeat_on_lifecycle_local`] instead; the two are separate explicit APIs
+/// sharing one internal state machine.
+///
+/// Child block futures are `Send + 'static` because Tokio workers execute
+/// them via [`tokio::spawn`]; the factory itself may capture `!Send` data.
 ///
 /// Every lifecycle subscription is removed when the future completes, is
 /// cancelled externally, or setup fails.
@@ -89,11 +92,102 @@ impl Drop for AbortOnDrop {
 pub async fn repeat_on_lifecycle<F, Fut>(
     lifecycle: LifecycleRegistry,
     min_state: LifecycleState,
-    mut block: F,
+    block: F,
 ) -> Result<(), RepeatError>
 where
     F: FnMut() -> Fut,
     Fut: Future<Output = ()> + Send + 'static,
+{
+    run_repeat(lifecycle, min_state, block, tokio::spawn).await
+}
+
+/// Runs `block` like [`repeat_on_lifecycle`], but the block future may be
+/// thread-local (`!Send`).
+///
+/// This is the route for component work that holds `Rc`, `RefCell`, or other
+/// `!Send` state across await points. Child futures require only
+/// `Future<Output = ()> + 'static` and run on the thread driving the ambient
+/// [`LocalSet`](tokio::task::LocalSet) via [`tokio::task::spawn_local`];
+/// restart, abort-then-await, no-overlap, and destroy semantics match
+/// [`repeat_on_lifecycle`] exactly because both share the same state machine.
+///
+/// Call and poll this inside `LocalSet::run_until` or a
+/// [`tokio::runtime::LocalRuntime`]. Nothing here creates a `LocalSet`.
+///
+/// Every lifecycle subscription is removed when the future completes, is
+/// cancelled externally, or setup fails.
+///
+/// # Errors
+///
+/// Returns [`RepeatError::InvalidMinState`] if `min_state` is
+/// [`LifecycleState::Initialized`]. A lifecycle that is already destroyed
+/// resolves to `Ok(())` immediately without starting work.
+///
+/// # Panics
+///
+/// Panics if a child is launched outside a [`LocalSet`](tokio::task::LocalSet)
+/// or local runtime (propagates [`tokio::task::spawn_local`]'s panic). Tokio
+/// offers no non-panicking probe for the local-task context, so no typed
+/// error is possible here; the contract matches `spawn_local` itself.
+///
+/// # Example
+///
+/// ```rust,no_run
+/// use essenty_lifecycle::{LifecycleRegistry, LifecycleState};
+/// use essenty_lifecycle_tokio::repeat_on_lifecycle_local;
+/// use std::cell::RefCell;
+/// use std::rc::Rc;
+///
+/// # #[tokio::main(flavor = "current_thread")]
+/// # async fn main() {
+/// let lifecycle = LifecycleRegistry::new();
+/// let local = tokio::task::LocalSet::new();
+/// local
+///     .run_until(async {
+///         let component = Rc::new(RefCell::new(Vec::new()));
+///         repeat_on_lifecycle_local(lifecycle, LifecycleState::Started, || {
+///             let component = Rc::clone(&component);
+///             async move {
+///                 // `!Send` state held across an await point.
+///                 component.borrow_mut().push(1_u32);
+///                 tokio::task::yield_now().await;
+///                 component.borrow_mut().push(2_u32);
+///             }
+///         })
+///         .await
+///         .unwrap();
+///     })
+///     .await;
+/// # }
+/// ```
+pub async fn repeat_on_lifecycle_local<F, Fut>(
+    lifecycle: LifecycleRegistry,
+    min_state: LifecycleState,
+    block: F,
+) -> Result<(), RepeatError>
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = ()> + 'static,
+{
+    run_repeat(lifecycle, min_state, block, tokio::task::spawn_local).await
+}
+
+/// Shared repeat state machine behind [`repeat_on_lifecycle`] and
+/// [`repeat_on_lifecycle_local`].
+///
+/// The only difference between the two public APIs is how a child is
+/// launched, so the strategy travels as a plain function pointer —
+/// [`tokio::spawn`] for `Send` children, [`tokio::task::spawn_local`] for
+/// thread-local ones. No executor trait is introduced; the signatures stay
+/// separate and explicit at the public boundary.
+async fn run_repeat<F, Fut>(
+    lifecycle: LifecycleRegistry,
+    min_state: LifecycleState,
+    mut block: F,
+    spawn_child: fn(Fut) -> JoinHandle<()>,
+) -> Result<(), RepeatError>
+where
+    F: FnMut() -> Fut,
 {
     if min_state == LifecycleState::Initialized {
         return Err(RepeatError::InvalidMinState { min_state });
@@ -126,7 +220,7 @@ where
         }
         if is_active(state, min_state) {
             if child.0.is_none() {
-                child.0 = Some(tokio::spawn(block()));
+                child.0 = Some(spawn_child(block()));
             }
         } else {
             stop_child(&mut child.0).await;

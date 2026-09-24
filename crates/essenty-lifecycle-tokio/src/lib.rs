@@ -13,9 +13,12 @@
 //! The Kotlin type system (coroutine scopes, Flows, Reaktive disposables) is not
 //! portable to Rust, so this crate ports the *capability*, not the API:
 //!
-//! - task/scope cancelled on `DESTROYED` → [`LifecycleScope`]
+//! - task/scope cancelled on `DESTROYED` → [`LifecycleScope`], via
+//!   [`spawn`](LifecycleScope::spawn) for `Send` work or
+//!   [`spawn_local`](LifecycleScope::spawn_local) for thread-local work
 //! - work starts when the lifecycle reaches an active state, restarts on
 //!   re-entry, and ends permanently on `DESTROYED` → [`repeat_on_lifecycle`]
+//!   (`Send`) or [`repeat_on_lifecycle_local`] (thread-local)
 //! - subscriptions/resources disposed when the lifecycle ends → task
 //!   cancellation plus RAII [`Subscription`](essenty_lifecycle::Subscription)
 //!   guards (no reactive framework ported)
@@ -50,7 +53,37 @@
 //!
 //! For explicit runtime control (more predictable in tests), use
 //! [`LifecycleScope::with_handle`] with a cloned
-//! [`tokio::runtime::Handle`].
+//! [`tokio::runtime::Handle`], or [`LifecycleScope::try_new`] when the ambient
+//! runtime may be absent.
+//!
+//! Thread-local work uses the matching local APIs inside a
+//! [`LocalSet`](tokio::task::LocalSet):
+//!
+//! ```rust,no_run
+//! use essenty_lifecycle::LifecycleRegistry;
+//! use essenty_lifecycle_tokio::LifecycleScope;
+//! use std::cell::RefCell;
+//! use std::rc::Rc;
+//!
+//! # #[tokio::main(flavor = "current_thread")]
+//! # async fn main() {
+//! let lifecycle = LifecycleRegistry::new();
+//! let local = tokio::task::LocalSet::new();
+//! local
+//!     .run_until(async {
+//!         let scope = LifecycleScope::new(lifecycle.clone());
+//!         let component = Rc::new(RefCell::new(0_u32));
+//!         scope
+//!             .spawn_local(async move {
+//!                 *component.borrow_mut() += 1;
+//!                 tokio::task::yield_now().await;
+//!                 *component.borrow_mut() += 1;
+//!             })
+//!             .unwrap();
+//!     })
+//!     .await;
+//! # }
+//! ```
 //!
 //! # `repeat_on_lifecycle` usage
 //!
@@ -81,47 +114,51 @@
 //! The block factory is invoked anew on every entry into the active region;
 //! futures are never paused and resumed. Two instances never run concurrently:
 //! the previous child is aborted and awaited before a new one starts.
+//! [`repeat_on_lifecycle_local`] provides identical semantics for
+//! thread-local (`!Send`) block futures.
 //!
 //! # Cancellation semantics
 //!
 //! - Leaving the active region aborts the current child task, then awaits its
 //!   `JoinHandle` so rapid `START → STOP → START` sequences cannot overlap.
-//! - `DESTROYED` aborts the child and completes the [`repeat_on_lifecycle`]
-//!   future permanently; later transitions never restart it.
-//! - Dropping the [`repeat_on_lifecycle`] future (external cancellation)
-//!   unsubscribes the lifecycle observer and aborts the running child.
-//! - Dropping a [`LifecycleScope`] aborts every owned task and removes its
-//!   destroy subscription; no detached tasks are left behind.
+//! - `DESTROYED` aborts the child and completes the repeat future permanently;
+//!   later transitions never restart it.
+//! - Dropping a repeat future (external cancellation) unsubscribes the
+//!   lifecycle observer and aborts the running child.
+//! - Dropping a [`LifecycleScope`] aborts every owned task — `Send` and local
+//!   alike — and removes its destroy subscription; no detached tasks are left
+//!   behind.
 //! - Every lifecycle subscription is RAII-guarded and removed on scope drop,
 //!   repeat completion/cancellation, destroy, or setup failure.
 //!
 //! # Tokio runtime requirement
 //!
-//! This crate never creates a runtime. [`LifecycleScope::new`] uses
-//! [`tokio::runtime::Handle::current`], [`LifecycleScope::with_handle`] uses
-//! the supplied handle, and [`repeat_on_lifecycle`] spawns children on the
-//! ambient runtime via [`tokio::spawn`]. Callers must poll or await inside a
-//! Tokio runtime; otherwise Tokio panics. Prefer passing an explicit `Handle`
-//! in libraries and tests.
+//! This crate never creates a runtime and never creates a `LocalSet`.
+//! [`LifecycleScope::new`] uses [`tokio::runtime::Handle::current`] and panics
+//! outside a runtime; [`LifecycleScope::try_new`] returns a typed
+//! [`ScopeError`](crate::ScopeError) instead, and
+//! [`LifecycleScope::with_handle`] takes an explicit handle. The `Send` repeat
+//! spawns children on the ambient runtime via [`tokio::spawn`]; the local
+//! repeat and [`spawn_local`](LifecycleScope::spawn_local) require an ambient
+//! [`LocalSet`](tokio::task::LocalSet) or local runtime and propagate Tokio's
+//! panic otherwise (Tokio offers no non-panicking probe for that context).
+//! Prefer explicit handles in libraries and tests.
 //!
-//! # Send constraints
+//! # `Send` and local APIs
 //!
 //! The core registry stays single-threaded (`!Send`/`!Sync`); this crate does
-//! not change that. [`LifecycleScope`] and the [`repeat_on_lifecycle`] future
-//! are therefore `!Send` and must live on the lifecycle-owning thread (for
-//! example the current-thread runtime or a `LocalSet`). Stricter bounds stay
-//! local: [`LifecycleScope::spawn`] and the repeat block futures require
-//! `Future + Send + 'static` because Tokio worker threads execute them. The
-//! repeat block *factory* itself may capture `!Send` data; only the future it
-//! returns must be `Send`.
+//! not change that. [`LifecycleScope`] and both repeat futures are therefore
+//! `!Send` and must live on the lifecycle-owning thread (for example the
+//! current-thread runtime or a `LocalSet`). The two flavors are separate
+//! explicit APIs rather than one generic bound:
 //!
-//! # `spawn_local` status
+//! | Work | Scope | Repeat |
+//! |---|---|---|
+//! | `Send + 'static` futures | [`spawn`](LifecycleScope::spawn) | [`repeat_on_lifecycle`] |
+//! | Thread-local futures (`Rc`, `RefCell`, …) | [`spawn_local`](LifecycleScope::spawn_local) (inside a `LocalSet`) | [`repeat_on_lifecycle_local`] (inside a `LocalSet`) |
 //!
-//! `spawn_local: deferred.` Tokio local tasks need a `LocalSet` owner, and
-//! hiding that ownership inside the scope would add global machinery for
-//! little value. `!Send` async work (for example `Rc`/`RefCell` component
-//! state) should use `tokio::task::LocalSet::spawn_local` directly alongside
-//! the lifecycle until a concrete Decompose-rs need arrives.
+//! The repeat block *factory* itself may capture `!Send` data in both flavors;
+//! only the future it returns has the flavor's bound.
 //!
 //! # Stream integration status
 //!
@@ -141,6 +178,6 @@ mod error;
 mod repeat;
 mod scope;
 
-pub use error::{RepeatError, SpawnError};
-pub use repeat::repeat_on_lifecycle;
+pub use error::{RepeatError, ScopeError, SpawnError};
+pub use repeat::{repeat_on_lifecycle, repeat_on_lifecycle_local};
 pub use scope::LifecycleScope;
