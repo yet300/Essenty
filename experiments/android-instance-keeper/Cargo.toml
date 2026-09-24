@@ -1,0 +1,41 @@
+[package]
+name = "android-instance-keeper-harness"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+android-activity = { version = "0.6.1", features = ["native-activity"] }
+android_logger = "0.15.1"
+essenty-android = { path = "../../crates/essenty-android", features = ["native-activity"] }
+essenty-back-handler = { path = "../../crates/essenty-back-handler" }
+essenty-instance-keeper = { path = "../../crates/essenty-instance-keeper" }
+jni = { version = "0.22.4", default-features = false }
+log = "0.4"
+
+[package.metadata.android]
+package = "dev.essenty.instancekeeper"
+build_targets = ["aarch64-linux-android"]
+
+[package.metadata.android.sdk]
+min_sdk_version = 23
+target_sdk_version = 37
+
+[[package.metadata.android.application.activity]]
+name = "android.app.NativeActivity"
+label = "Essenty InstanceKeeper Runtime Proof"
+exported = true
+config_changes = "orientation|screenSize|smallestScreenSize|screenLayout|uiMode|keyboard|keyboardHidden|navigation|touchscreen|locale|layoutDirection|mcc|mnc|density|fontScale|fontWeightAdjustment|colorMode|grammaticalGender"
+
+[[package.metadata.android.application.activity.meta_data]]
+name = "android.app.lib_name"
+value = "android_instance_keeper_harness"
+
+[[package.metadata.android.application.activity.intent_filter]]
+actions = ["android.intent.action.MAIN"]
+categories = ["android.intent.category.LAUNCHER"]

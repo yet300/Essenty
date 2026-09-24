@@ -4,14 +4,14 @@
 
 | Integration | Origin | Status |
 |---|---|---|
-| NativeActivity lifecycle and saved state; direct `android.window` back callbacks | Rust extension | Implemented/compile-checked; API 36 dynamic-proxy PoC runtime-tested; API 33 and production-adapter runtime checks pending |
+| NativeActivity lifecycle, saved state, declared configuration retention; direct `android.window` back callbacks | Rust extension | Implemented/compile-checked; API 36.1 lifecycle/configuration runtime-tested; integrated API 36.1 back adapter attached/cancelled/unregistered; API 33 runtime unavailable |
 | Browser lifecycle, history, storage | Rust extension | Implemented; WASM compile-tested, browser runtime tests planned |
 | macOS application lifecycle | Rust extension | Implemented; runtime-tested |
 | UIKit/WatchKit application lifecycle | Rust extension | Implemented; compile-tested |
 
 The Android adapter intentionally uses NativeActivity and direct Android APIs,
 not upstream's AndroidX integration classes. See [Android](ANDROID.md) for the
-runtime verification boundaries.
+runtime verification boundaries and the configuration-retention contract.
 
 Reference: upstream Essenty commit [`c4f1e914185daa21de4867716a102b44b9a945a3`](https://github.com/arkivanov/Essenty/tree/c4f1e914185daa21de4867716a102b44b9a945a3), inspected 2026-09-23. This is a behavioral comparison, not a Kotlin API port. A `MATCHES` label means a Rust regression test covers the stated behavior; it does not claim general equivalence.
 
@@ -65,6 +65,20 @@ Upstream references: [contract](https://github.com/arkivanov/Essenty/blob/c4f1e9
 | Keys and type mismatch | INTENTIONALLY DIFFERENT | Rust uses string keys and returns `TypeMismatch`; Kotlin accepts `Any` keys and casts in typed helpers. `type_mismatch_returns_error_and_keeps_value` |
 | Explicit put/remove of prebuilt instance | TODO | Current Rust API is get/create oriented. Add only if a concrete component owner needs it. |
 
+### NativeActivity host semantics
+
+| Host behavior | Status | Evidence / contract |
+|---|---|---|
+| Same in-memory Rust instances through declared configuration changes | SEMANTICALLY EQUIVALENT for verified cases | The app declares NativeActivity `configChanges`; `MainEvent::ConfigChanged` updates host configuration while one `android_main` and one local `Rc` keeper remain alive. API 36.1 runtime covered rotation, locale, night mode, resizing, and 50 events. |
+| Same instances through arbitrary Activity recreation | UNSUPPORTED for non-`Send` values | Runtime orientation recreation on API 36.1 produced a second `android_main` on a new thread with a fresh keeper; old `Rc` dropped once. A serialized StateKeeper marker was restored. No `Rc` transfer or process-global keeper registry exists. |
+| Retention after process death | UNSUPPORTED by design | `InstanceKeeper` contains in-memory objects. Restore serializable data with StateKeeper bytes or persistent storage into a fresh keeper. |
+
+This is not implementation identity with upstream Android Essenty. Upstream's
+Android integration retains values in `ViewModelStore` while Activities are
+recreated. The Rust NativeActivity integration instead handles declared
+configuration changes in place so the Rust execution context survives. The two
+provide equivalent retained-instance behavior only for those handled changes.
+
 ## BackHandler
 
 Upstream references: [dispatcher](https://github.com/arkivanov/Essenty/blob/c4f1e914185daa21de4867716a102b44b9a945a3/back-handler/src/commonMain/kotlin/com/arkivanov/essenty/backhandler/DefaultBackDispatcher.kt), [callback](https://github.com/arkivanov/Essenty/blob/c4f1e914185daa21de4867716a102b44b9a945a3/back-handler/src/commonMain/kotlin/com/arkivanov/essenty/backhandler/BackCallback.kt), [tests](https://github.com/arkivanov/Essenty/blob/c4f1e914185daa21de4867716a102b44b9a945a3/back-handler/src/commonTest/kotlin/com/arkivanov/essenty/backhandler/DefaultBackDispatcherTest.kt).
@@ -87,10 +101,12 @@ Upstream references: [dispatcher](https://github.com/arkivanov/Essenty/blob/c4f1
 
 | Behavior | Status | Rust evidence / decision |
 |---|---|---|
-| Android lifecycle | IMPLEMENTED; runtime pending | `NativeActivityLifecycle` observes the `android-activity` event loop. It is a NativeActivity adapter and does not mirror AndroidX owner attachment timing. |
-| Android saved state | IMPLEMENTED; emulator recreation pending | `NativeActivityState` uses a versioned, checksummed binary envelope and native `StateLoader`/`StateSaver`; old `EST1` snapshots remain readable. |
-| Android retained instances | NOT IMPLEMENTED | Core values are `Rc`-owned and thread-confined. NativeActivity does not yet provide a proven cross-recreation handoff plus deterministic stale-token cleanup. |
-| Android back | IMPLEMENTED; API 33 and integrated runtime pending | API <33 uses NativeActivity input; API 33 uses `OnBackInvokedCallback`; API 34+ uses `OnBackAnimationCallback`. Core dispatcher owns priority and gesture selection. |
+| Android lifecycle | IMPLEMENTED; API 36.1 runtime exercised | `NativeActivityLifecycle` observes `android-activity` events. This is a NativeActivity adapter and does not mirror AndroidX owner attachment timing. |
+| Android saved state | IMPLEMENTED; API 36.1 recreation runtime-tested | `NativeActivityState` uses a versioned, checksummed binary envelope and native `StateLoader`/`StateSaver`; old `EST1` snapshots remain readable. A 57-byte envelope and exact registered marker survived orientation recreation. Process relaunch was not tested. |
+| Android InstanceKeeper core | IMPLEMENTED | The core keeper remains local and `Rc`-based. |
+| NativeActivity configuration retention | RUNTIME VERIFIED on API 36.1 | In-place handled changes preserved one native thread, keeper, and retained object through 50 events; final Activity destroy dropped it once. The app must declare Cargo manifest metadata. |
+| Arbitrary Activity recreation retention | UNSUPPORTED for non-`Send` values | New host threads cannot receive the prior local `Rc` values. StateKeeper is the serialization boundary. |
+| Android back | IMPLEMENTED; API 33 runtime unavailable | API <33 uses NativeActivity input; API 33 uses `OnBackInvokedCallback`; API 34+ uses `OnBackAnimationCallback`. Integrated API 36.1 adapter registration, cancelled gesture, and unregister were runtime exercised; invoke was not. No API 33 AVD was available. |
 | Apple application lifecycle | INTENTIONALLY DIFFERENT | macOS, UIKit and WatchKit adapters observe process-wide notifications with `objc2`; they do not model individual scenes. macOS synthetic notification delivery and observer removal were runtime-tested; UIKit and WatchKit were compile-tested only. |
 | Browser lifecycle | INTENTIONALLY DIFFERENT | Visibility and `pagehide`/`pageshow` listeners are wired. A persisted `pagehide` leaves the registry restorable; `persisted_page_hide_preserves_lifecycle_for_bfcache` covers the mapping. Browser delivery remains untested. |
 | Browser back | NOT APPLICABLE | The opt-in `BrowserHistoryBack` listener forwards `popstate` after history navigation and cannot cancel it. It does not claim upstream Android back semantics. |
