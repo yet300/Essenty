@@ -100,20 +100,34 @@ an exhaustive matrix — no evidence of divergence found.
 Upstream (`CoroutineScopeWithLifecycle.kt`, `FlowWithLifecycle.kt`,
 `RepeatOnLifecycle.kt`, `DispatchersExt.kt`, 3 test files): lifecycle-bound
 `CoroutineScope`, `Flow.withLifecycle`, `repeatOnLifecycle`, Main-dispatcher
-helpers. Status: **Kotlin-specific integration — NOT_APPLICABLE as a module**.
-No Tokio (or any executor) was added. The `do_on_destroy` helper now gives the
-executor-neutral primitive a future async bridge needs (destroy → cancel), and
-`repeatOnLifecycle`'s start/stop relaunch maps to `do_on_start`/`do_on_stop`
-pairs. A `Future`/`Stream`-based integration may be proposed for Decompose-rs
-later, but nothing in the current core blocks it.
+helpers. Status: **upstream Kotlin Coroutine API is language-specific; the
+lifecycle-aware async capability is implemented through
+`essenty-lifecycle-tokio`** (optional integration crate, core stays
+Tokio-free).
+
+| Upstream | Rust |
+|---|---|
+| `CoroutineScopeWithLifecycle` / `coroutineScope()` / `withLifecycle` (cancel on destroy; inactive when created destroyed) | `LifecycleScope`: destroy aborts every owned task, scope drop aborts + unsubscribes, spawn after destroy is `SpawnError::Destroyed` (scope tests) |
+| `Lifecycle.repeatOnLifecycle` (reject `INITIALIZED`; immediate return on `DESTROYED`; cancel/relaunch across active states; Mutex against overlap; unsubscribe in `finally`) | `repeat_on_lifecycle` over `CREATED`/`STARTED`/`RESUMED`: `RepeatError::InvalidMinState` for `INITIALIZED`, immediate `Ok` on `DESTROYED`, factory-reconstructed (never paused) child per entry, abort-then-await before restart so rapid `START → STOP → START` never overlaps, RAII unsubscription on completion/external cancellation (repeat tests, incl. rapid + external-cancel + destroy cases) |
+| `Flow.withLifecycle` | Deferred: no `Stream` adapter. Upstream it is a thin wrapper over `repeatOnLifecycle`; scope + repeat cover the capability without a new framework. |
+| `Dispatchers.Main.immediateOrFallback` | Intentionally absent: Tokio has no UI-main equivalent; platform dispatch belongs to a future UI integration. |
+
+Dependency direction is `essenty-lifecycle-tokio → essenty-lifecycle → core`;
+no core crate depends on Tokio (verified via dependency tree). Scope and
+repeat future are `!Send` (lifecycle thread); only spawned/block futures
+require `Send + 'static`. `spawn_local` is deferred (hidden `LocalSet`
+ownership not justified); `tokio::task::LocalSet::spawn_local` remains the
+direct route for `Rc`/`RefCell` work.
 
 ## 5. lifecycle-reaktive assessment
 
 Upstream (`DisposableWithLifecycle.kt` + test): `DisposableScope()` /
-`Disposable.withLifecycle` disposed on destroy. Status: **NOT_APPLICABLE as a
-module**; subsumed by RAII. `Subscription` (lifecycle), `Drop` (instances),
-and `do_on_destroy` (arbitrary cleanup) cover every behavior the Reaktive
-helpers supply. No reactive framework was introduced.
+`Disposable.withLifecycle` disposed on destroy. Status: **Reaktive-specific
+API not ported; lifecycle-bound async/resource cleanup is covered by the Tokio
+integration + Rust RAII**. `Subscription` (lifecycle), `Drop` (instances),
+`do_on_destroy` (arbitrary cleanup), `LifecycleScope` drop/destroy abort, and
+`repeat_on_lifecycle` external-cancellation abort + unsubscribe cover every
+behavior the Reaktive helpers supply. No reactive framework was introduced.
 
 ## 6. StateKeeper parity (`essenty-state-keeper`)
 
@@ -223,8 +237,10 @@ Upstream refs: `BackHandler.kt`, `BackHandlerOwner.kt`, `BackDispatcher.kt`,
   design task).
 - `BackEvent` progress-range clamping (intentional validation difference;
   reversible without breakage if Decompose needs it).
-- Executor-neutral async/reactive bridges (assessed NOT_APPLICABLE; future
-  Decompose-rs proposal, not Essenty foundation work).
+- Executor-neutral async/reactive bridges: implemented as the optional
+  `essenty-lifecycle-tokio` crate (scope + repeat; streams/`spawn_local`
+  deferred with recorded rationale). No core Tokio dependency; no new
+  executor or reactive framework.
 
 ## 12. Conclusions
 
@@ -232,8 +248,10 @@ Upstream refs: `BackHandler.kt`, `BackHandlerOwner.kt`, `BackDispatcher.kt`,
   / documented intentional differences; every MATCHES row has a Rust
   regression test).
 - Platform integration parity: per `PLATFORM_PARITY.md` Matrix A.
-- Auxiliary-module parity: coroutines/reaktive NOT_APPLICABLE with recorded
-  rationale; serialization helpers intentionally different (serde model).
+- Auxiliary-module parity: coroutines capability implemented via
+  `essenty-lifecycle-tokio` (Kotlin API itself language-specific, not
+  transliterated); Reaktive API not ported, cleanup covered by Tokio + RAII;
+  serialization helpers intentionally different (serde model).
 - Rust-specific extension quality: per `PLATFORM_PARITY.md` Matrix B.
 - Runtime verification confidence: per `PLATFORM_PARITY.md` taxonomy.
 - Decompose-rs readiness: per `DECOMPOSE_READINESS.md`.

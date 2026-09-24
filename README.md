@@ -41,10 +41,11 @@ Android  Apple      Web
 - **Capability-oriented, not triple-oriented.** There is one crate per
   platform family — never one crate per CPU architecture. OS differences
   inside the Apple family are modules, not crates.
-- **No executor coupling.** The core is synchronous and runtime-agnostic.
-  There is intentionally **no Tokio** (or any async runtime) dependency; async
-  will only appear where a concrete lifecycle integration genuinely needs it,
-  via runtime-agnostic `Future`s.
+- **No executor coupling in core.** The core is synchronous and runtime-agnostic.
+  There is intentionally **no Tokio** (or any async runtime) dependency in core
+  crates; lifecycle-aware async lives in the optional `essenty-lifecycle-tokio`
+  integration (Tokio directly, minimal features), which depends inward on
+  `essenty-lifecycle`.
 
 ## Workspace crates
 
@@ -52,6 +53,7 @@ Android  Apple      Web
 |---|---|---|---|
 | `essenty` | Umbrella facade re-exporting the core APIs (`essenty = "0.1"`) | Rust extension | Implemented |
 | `essenty-lifecycle` | Ordered states and lifecycle subscriptions | Upstream Essenty behavior | Implemented; unit tested |
+| `essenty-lifecycle-tokio` | Optional Tokio integration: lifecycle-bound task scope + repeat-on-lifecycle | Upstream `lifecycle-coroutines` capability, Rust-native (Reaktive cleanup via cancellation + RAII) | Implemented; Tokio tests (core stays Tokio-free) |
 | `essenty-state-keeper` | Byte providers, restore consumption, pluggable codecs | Upstream Essenty behavior, Rust codec extension | Implemented; unit tested |
 | `essenty-instance-keeper` | Retained objects and deterministic cleanup | Upstream Essenty behavior | Implemented; unit tested |
 | `essenty-back-handler` | Regular and predictive back dispatch, including gesture position | Upstream Essenty behavior, Rust API | Implemented; unit tested |

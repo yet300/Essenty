@@ -16,7 +16,7 @@ only, per the audit's scope boundary.)
 | Saved state per component | `StateKeeper` (register/consume/save, optional providers, typed errors, deterministic snapshots) | None — key namespacing is the compositor's job |
 | Retained instances per component | `InstanceKeeper` (`get_or_create`/`put`/`get`/`remove`/`destroy`, `Drop` cleanup, `destroy_all` at scope end) | None |
 | Back handling per component | `BackDispatcher` (priority + enabled + predictive gestures + aggregate listeners for native sync) | Parent/child propagation is Decompose-rs design work (upstream has no such abstraction either) |
-| Lifecycle-bound cleanup (coroutine cancel, disposable dispose) | `do_on_destroy` + RAII | Executor-neutral; no Tokio coupling introduced |
+| Lifecycle-bound cleanup (coroutine cancel, disposable dispose) | `do_on_destroy` + RAII, plus optional `essenty-lifecycle-tokio` (`LifecycleScope`, `repeat_on_lifecycle`) | None — core stays executor-neutral; Tokio lives only in the optional integration |
 
 ## Constraints check (all satisfied)
 
@@ -30,8 +30,10 @@ only, per the audit's scope boundary.)
 - No Android-specific ownership: retention is `Rc`-local, state is opaque
   bytes; the NativeActivity contract (`PLATFORM_PARITY.md`) is one host
   binding among three, not a core assumption.
-- No executor lock-in: core is synchronous; async bridges (destroy→cancel,
-  start/stop relaunch) are expressible via `do_on_*` without new core APIs.
+- No executor lock-in: core is synchronous; the optional Tokio bridge
+  (`LifecycleScope` destroy→cancel, `repeat_on_lifecycle` start/stop relaunch)
+  is expressible without new core APIs, and a component can own a
+  `LifecycleScope` so its async tasks die with its lifecycle.
 
 ## Ownership sketch (thought experiment, not committed API)
 
