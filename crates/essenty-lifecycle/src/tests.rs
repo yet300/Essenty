@@ -263,3 +263,151 @@ fn callback_can_destroy_during_create() {
     lifecycle.create().unwrap();
     assert_eq!(lifecycle.state(), LifecycleState::Destroyed);
 }
+
+#[test]
+fn do_on_create_runs_once_then_unsubscribes() {
+    use std::cell::Cell;
+    let lifecycle = LifecycleRegistry::new();
+    let calls = StdRc::new(Cell::new(0_u32));
+    let probe = StdRc::clone(&calls);
+    let guard = lifecycle.do_on_create(move || probe.set(probe.get() + 1));
+    assert!(guard.is_active());
+    lifecycle.move_to(LifecycleState::Resumed).unwrap();
+    lifecycle.move_to(LifecycleState::Created).unwrap();
+    lifecycle.move_to(LifecycleState::Resumed).unwrap();
+    assert_eq!(calls.get(), 1);
+    assert!(!guard.is_active());
+}
+
+#[test]
+fn do_on_create_late_subscriber_runs_immediately() {
+    use std::cell::Cell;
+    let lifecycle = LifecycleRegistry::new();
+    lifecycle.move_to(LifecycleState::Started).unwrap();
+    let calls = StdRc::new(Cell::new(0_u32));
+    let probe = StdRc::clone(&calls);
+    let guard = lifecycle.do_on_create(move || probe.set(probe.get() + 1));
+    assert_eq!(calls.get(), 1);
+    assert!(!guard.is_active());
+    lifecycle.move_to(LifecycleState::Created).unwrap();
+    assert_eq!(calls.get(), 1);
+}
+
+#[test]
+fn do_on_start_and_resume_follow_forward_transitions_only() {
+    use std::cell::Cell;
+    let lifecycle = LifecycleRegistry::new();
+    let starts = StdRc::new(Cell::new(0_u32));
+    let resumes = StdRc::new(Cell::new(0_u32));
+    let starts_probe = StdRc::clone(&starts);
+    let resumes_probe = StdRc::clone(&resumes);
+    let _s = lifecycle.do_on_start(move || starts_probe.set(starts_probe.get() + 1));
+    let _r = lifecycle.do_on_resume(move || resumes_probe.set(resumes_probe.get() + 1));
+    lifecycle.move_to(LifecycleState::Resumed).unwrap();
+    assert_eq!(starts.get(), 1);
+    assert_eq!(resumes.get(), 1);
+    // Backward transitions must not retrigger forward helpers.
+    lifecycle.pause().unwrap();
+    lifecycle.stop().unwrap();
+    assert_eq!(starts.get(), 1);
+    assert_eq!(resumes.get(), 1);
+}
+
+#[test]
+fn do_on_start_once_fires_single_time() {
+    use std::cell::Cell;
+    let lifecycle = LifecycleRegistry::new();
+    let calls = StdRc::new(Cell::new(0_u32));
+    let probe = StdRc::clone(&calls);
+    let guard = lifecycle.do_on_start_once(move || probe.set(probe.get() + 1));
+    lifecycle.move_to(LifecycleState::Resumed).unwrap();
+    lifecycle.move_to(LifecycleState::Created).unwrap();
+    lifecycle.move_to(LifecycleState::Started).unwrap();
+    assert_eq!(calls.get(), 1);
+    assert!(!guard.is_active());
+}
+
+#[test]
+fn do_on_pause_distinguishes_direction_from_start() {
+    use std::cell::Cell;
+    let lifecycle = LifecycleRegistry::new();
+    let pauses = StdRc::new(Cell::new(0_u32));
+    let probe = StdRc::clone(&pauses);
+    // Late subscription at Resumed replays the forward chain; that replay
+    // must not look like a pause.
+    lifecycle.move_to(LifecycleState::Resumed).unwrap();
+    let _guard = lifecycle.do_on_pause(move || probe.set(probe.get() + 1));
+    assert_eq!(pauses.get(), 0);
+    lifecycle.pause().unwrap();
+    assert_eq!(pauses.get(), 1);
+    lifecycle.resume().unwrap();
+    lifecycle.pause().unwrap();
+    assert_eq!(pauses.get(), 2);
+}
+
+#[test]
+fn do_on_stop_distinguishes_direction_from_create() {
+    use std::cell::Cell;
+    let lifecycle = LifecycleRegistry::new();
+    let stops = StdRc::new(Cell::new(0_u32));
+    let probe = StdRc::clone(&stops);
+    let _guard = lifecycle.do_on_stop(move || probe.set(probe.get() + 1));
+    lifecycle.create().unwrap();
+    assert_eq!(stops.get(), 0);
+    lifecycle.move_to(LifecycleState::Resumed).unwrap();
+    assert_eq!(stops.get(), 0);
+    lifecycle.pause().unwrap();
+    lifecycle.stop().unwrap();
+    assert_eq!(stops.get(), 1);
+}
+
+#[test]
+fn do_on_pause_once_and_stop_once_fire_single_time() {
+    use std::cell::Cell;
+    let lifecycle = LifecycleRegistry::new();
+    let pauses = StdRc::new(Cell::new(0_u32));
+    let stops = StdRc::new(Cell::new(0_u32));
+    let pause_probe = StdRc::clone(&pauses);
+    let stop_probe = StdRc::clone(&stops);
+    let _p = lifecycle.do_on_pause_once(move || pause_probe.set(pause_probe.get() + 1));
+    let _s = lifecycle.do_on_stop_once(move || stop_probe.set(stop_probe.get() + 1));
+    lifecycle.move_to(LifecycleState::Resumed).unwrap();
+    lifecycle.pause().unwrap();
+    lifecycle.resume().unwrap();
+    lifecycle.pause().unwrap();
+    lifecycle.stop().unwrap();
+    lifecycle.start().unwrap();
+    lifecycle.stop().unwrap();
+    assert_eq!(pauses.get(), 1);
+    assert_eq!(stops.get(), 1);
+}
+
+#[test]
+fn do_on_resume_once_and_destroy_behavior() {
+    use std::cell::Cell;
+    let lifecycle = LifecycleRegistry::new();
+    let resumes = StdRc::new(Cell::new(0_u32));
+    let destroys = StdRc::new(Cell::new(0_u32));
+    let resume_probe = StdRc::clone(&resumes);
+    let destroy_probe = StdRc::clone(&destroys);
+    let _r = lifecycle.do_on_resume_once(move || resume_probe.set(resume_probe.get() + 1));
+    let _d = lifecycle.do_on_destroy(move || destroy_probe.set(destroy_probe.get() + 1));
+    lifecycle.move_to(LifecycleState::Resumed).unwrap();
+    lifecycle.move_to(LifecycleState::Created).unwrap();
+    lifecycle.move_to(LifecycleState::Resumed).unwrap();
+    assert_eq!(resumes.get(), 1);
+    lifecycle.destroy().unwrap();
+    assert_eq!(destroys.get(), 1);
+}
+
+#[test]
+fn do_on_destroy_runs_immediately_when_already_destroyed() {
+    use std::cell::Cell;
+    let lifecycle = LifecycleRegistry::new();
+    lifecycle.destroy().unwrap();
+    let calls = StdRc::new(Cell::new(0_u32));
+    let probe = StdRc::clone(&calls);
+    let guard = lifecycle.do_on_destroy(move || probe.set(probe.get() + 1));
+    assert_eq!(calls.get(), 1);
+    assert!(!guard.is_active());
+}

@@ -49,6 +49,16 @@ impl Subscription {
         self.inner.take().map_or(u64::MAX, |guard| guard.id)
     }
 
+    /// Returns the registration id of the observer, or `None` if the guard
+    /// was detached or the observer already removed.
+    ///
+    /// The id can be passed to [`LifecycleRegistry::unsubscribe`] for
+    /// explicit removal, including self-removal from inside a callback.
+    #[must_use]
+    pub fn id(&self) -> Option<u64> {
+        self.inner.as_ref().map(|guard| guard.id)
+    }
+
     fn remove(&mut self) {
         if let Some(guard) = self.inner.take() {
             if let Some(registry) = guard.registry.upgrade() {
@@ -272,6 +282,145 @@ impl LifecycleRegistry {
             self.move_to(LifecycleState::Created)?;
         }
         self.apply(LifecycleState::Destroyed)
+    }
+
+    /// Registers `callback` to run on the `Initialized -> Created` transition.
+    ///
+    /// This mirrors upstream `doOnCreate`: the callback runs exactly once and
+    /// is then unsubscribed. A late subscriber on an already-created registry
+    /// runs immediately via subscription replay.
+    pub fn do_on_create(&self, callback: impl Fn() + 'static) -> Subscription {
+        self.on_transition(LifecycleState::Initialized, LifecycleState::Created, true, callback)
+    }
+
+    /// Registers `callback` to run on every `Created -> Started` transition.
+    ///
+    /// Mirrors upstream `doOnStart(isOneTime = false)`.
+    pub fn do_on_start(&self, callback: impl Fn() + 'static) -> Subscription {
+        self.on_transition(LifecycleState::Created, LifecycleState::Started, false, callback)
+    }
+
+    /// Registers `callback` to run on the next `Created -> Started`
+    /// transition, then unsubscribes.
+    ///
+    /// Mirrors upstream `doOnStart(isOneTime = true)`.
+    pub fn do_on_start_once(&self, callback: impl Fn() + 'static) -> Subscription {
+        self.on_transition(LifecycleState::Created, LifecycleState::Started, true, callback)
+    }
+
+    /// Registers `callback` to run on every `Started -> Resumed` transition.
+    ///
+    /// Mirrors upstream `doOnResume(isOneTime = false)`.
+    pub fn do_on_resume(&self, callback: impl Fn() + 'static) -> Subscription {
+        self.on_transition(LifecycleState::Started, LifecycleState::Resumed, false, callback)
+    }
+
+    /// Registers `callback` to run on the next `Started -> Resumed`
+    /// transition, then unsubscribes.
+    ///
+    /// Mirrors upstream `doOnResume(isOneTime = true)`.
+    pub fn do_on_resume_once(&self, callback: impl Fn() + 'static) -> Subscription {
+        self.on_transition(LifecycleState::Started, LifecycleState::Resumed, true, callback)
+    }
+
+    /// Registers `callback` to run on every `Resumed -> Started` transition.
+    ///
+    /// Mirrors upstream `doOnPause(isOneTime = false)`. Direction is tracked
+    /// from consecutive deliveries, so a forward `Created -> Started`
+    /// transition does not trigger this callback.
+    pub fn do_on_pause(&self, callback: impl Fn() + 'static) -> Subscription {
+        self.on_transition(LifecycleState::Resumed, LifecycleState::Started, false, callback)
+    }
+
+    /// Registers `callback` to run on the next `Resumed -> Started`
+    /// transition, then unsubscribes.
+    ///
+    /// Mirrors upstream `doOnPause(isOneTime = true)`.
+    pub fn do_on_pause_once(&self, callback: impl Fn() + 'static) -> Subscription {
+        self.on_transition(LifecycleState::Resumed, LifecycleState::Started, true, callback)
+    }
+
+    /// Registers `callback` to run on every `Started -> Created` transition.
+    ///
+    /// Mirrors upstream `doOnStop(isOneTime = false)`. Direction is tracked
+    /// from consecutive deliveries, so a forward `Initialized -> Created`
+    /// transition does not trigger this callback.
+    pub fn do_on_stop(&self, callback: impl Fn() + 'static) -> Subscription {
+        self.on_transition(LifecycleState::Started, LifecycleState::Created, false, callback)
+    }
+
+    /// Registers `callback` to run on the next `Started -> Created`
+    /// transition, then unsubscribes.
+    ///
+    /// Mirrors upstream `doOnStop(isOneTime = true)`.
+    pub fn do_on_stop_once(&self, callback: impl Fn() + 'static) -> Subscription {
+        self.on_transition(LifecycleState::Started, LifecycleState::Created, true, callback)
+    }
+
+    /// Registers `callback` to run when the registry is destroyed.
+    ///
+    /// Mirrors upstream `doOnDestroy`: when the registry is already
+    /// destroyed, the callback runs immediately and the returned guard is
+    /// already inactive.
+    pub fn do_on_destroy(&self, callback: impl Fn() + 'static) -> Subscription {
+        if self.inner.borrow().state.is_destroyed() {
+            callback();
+            return self.subscribe(|_| {});
+        }
+        self.subscribe(move |state| {
+            if state == LifecycleState::Destroyed {
+                callback();
+            }
+        })
+    }
+
+    /// Subscribes to one directed transition, identified by consecutive
+    /// state deliveries `(from -> to)`.
+    ///
+    /// Observers only see state values, so direction-sensitive helpers (pause
+    /// vs. start both deliver `Started`, stop vs. create both deliver
+    /// `Created`) track the previously delivered state. Tracking starts at
+    /// `Initialized` so subscription replay — which synthetically walks the
+    /// forward chain — behaves like the equivalent upstream replay.
+    fn on_transition(
+        &self,
+        from: LifecycleState,
+        to: LifecycleState,
+        once: bool,
+        callback: impl Fn() + 'static,
+    ) -> Subscription {
+        use std::cell::Cell;
+        let previous = Rc::new(Cell::new(LifecycleState::Initialized));
+        let fired = Rc::new(Cell::new(false));
+        let id_slot = Rc::new(Cell::new(None::<u64>));
+        let registry = self.clone();
+        let subscription = self.subscribe({
+            let previous = Rc::clone(&previous);
+            let fired = Rc::clone(&fired);
+            let id_slot = Rc::clone(&id_slot);
+            move |state| {
+                let seen_from = previous.get();
+                previous.set(state);
+                if seen_from == from && state == to && (!once || !fired.get()) {
+                    fired.set(true);
+                    if once {
+                        if let Some(id) = id_slot.get() {
+                            let _ = registry.unsubscribe(id);
+                        }
+                    }
+                    callback();
+                }
+            }
+        });
+        id_slot.set(subscription.id());
+        // A one-shot helper may already have fired during subscription replay
+        // before its id was known; ensure it is unsubscribed exactly once.
+        if once && fired.get() {
+            if let Some(id) = id_slot.get() {
+                let _ = self.unsubscribe(id);
+            }
+        }
+        subscription
     }
 
     fn step(&self, from: LifecycleState, to: LifecycleState) -> Result<(), LifecycleError> {
