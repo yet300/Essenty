@@ -21,9 +21,10 @@ precisely.
 | visionOS | `aarch64-apple-visionos`, `aarch64-apple-visionos-sim` |
 | Mac Catalyst | `aarch64-apple-ios-macabi`, `x86_64-apple-ios-macabi` |
 
-On 2026-09-23, `cargo check --workspace --target <triple>` passed locally for
-all 21 triples. The `essenty-android/native-activity` feature also passed for
-both listed Android triples.
+On 2026-09-24, `cargo check --workspace --target <triple>` passed locally for
+all 21 triples after the AndroidX packaging work. The
+`essenty-android/native-activity` feature also passed for both listed Android
+triples.
 
 `cargo check` is a compile check only. Host tests exercise the four core
 primitives and mapping helpers. Neither cross-compilation nor a simulator SDK

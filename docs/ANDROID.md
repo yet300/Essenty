@@ -1,5 +1,23 @@
 # Android integration
 
+Android support has two distinct backends. The [AndroidX packaging
+analysis](ANDROIDX_INTEGRATION.md) documents the verified APK packaging path
+and the remaining runtime bridge work.
+
+| Integration | Origin | Status |
+|---|---|---|
+| AndroidX Lifecycle / `LifecycleOwner` | Upstream Essenty | Planned; packaging build-tested only |
+| AndroidX SavedStateRegistry | Upstream Essenty | Planned; packaging build-tested only |
+| AndroidX ViewModelStore retention | Upstream Essenty | Planned; packaging build-tested only |
+| AndroidX ordinary and predictive back | Upstream Essenty | Planned; packaging build-tested only |
+| NativeActivity lifecycle | Rust extension | Implemented; Android target compile-tested |
+| NativeActivity saved-state bytes | Rust extension | Implemented; Android target compile-tested; host round-trip tested |
+| NativeActivity ordinary Back key | Rust extension | Implemented; Android target compile-tested |
+
+No AndroidX adapter in this table has been runtime-tested on an emulator or
+device. The host-testable mapping helpers and predictive gesture position in
+the Rust core are preparation for the AndroidX bridge, not an attached bridge.
+
 ## Implemented
 
 The four core Essenty primitives work in Rust on Android. The optional

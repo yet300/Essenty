@@ -1,5 +1,17 @@
 # Semantic compatibility with Essenty
 
+## Platform integration origin and verification
+
+| Integration | Origin | Status |
+|---|---|---|
+| AndroidX Lifecycle, SavedStateRegistry, ViewModelStore, back | Upstream Essenty | Planned; AndroidX dependencies packaged in a build-tested APK, no JNI/runtime bridge |
+| NativeActivity lifecycle, state, ordinary Back key | Rust extension | Implemented; Android target compile-tested, host mappings unit-tested |
+| Browser lifecycle, history, storage | Rust extension | Implemented; WASM compile-tested, browser runtime tests planned |
+| macOS application lifecycle | Rust extension | Implemented; runtime-tested |
+| UIKit/WatchKit application lifecycle | Rust extension | Implemented; compile-tested |
+
+See [AndroidX integration](ANDROIDX_INTEGRATION.md) for the packaging boundary.
+
 Reference: upstream Essenty commit [`c4f1e914185daa21de4867716a102b44b9a945a3`](https://github.com/arkivanov/Essenty/tree/c4f1e914185daa21de4867716a102b44b9a945a3), inspected 2026-09-23. This is a behavioral comparison, not a Kotlin API port. A `MATCHES` label means a Rust regression test covers the stated behavior; it does not claim general equivalence.
 
 ## Lifecycle

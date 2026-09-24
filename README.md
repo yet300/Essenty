@@ -10,7 +10,8 @@ inside platform adapters where operating system APIs require it.
 > macOS, UIKit, Web, and Rust NativeActivity lifecycle adapters now observe
 > real platform events, with the verification levels and gaps documented in
 > [Android](docs/ANDROID.md), [Apple](docs/APPLE.md), and [Web](docs/WEB.md).
-> AndroidX saved state, retained objects, and predictive back are still planned.
+> AndroidX owner attachment is still planned. The AndroidX packaging path is
+> build-tested separately from NativeActivity; it is not runtime parity.
 
 This project is **not** affiliated with the Essenty authors. No Essenty source
 code was copied; only public behavioral concepts (lifecycle states, saved
@@ -47,16 +48,16 @@ Android  Apple      Web
 
 ## Workspace crates
 
-| Crate | Role | State |
-|---|---|---|
-| `essenty` | Umbrella facade re-exporting the core APIs (`essenty = "0.1"`) | Implemented |
-| `essenty-lifecycle` | Ordered states (`Initialized/Created/Started/Resumed/Destroyed`), validated transitions, RAII subscriptions, manually controlled registry | Implemented + tested |
-| `essenty-state-keeper` | Byte-oriented providers, single-shot restore consumption, deterministic ordered save, pluggable `serde` codecs (no hard-coded JSON) | Implemented + tested |
-| `essenty-instance-keeper` | `Rc`-shared retained objects with deterministic `Drop` cleanup, per-key type checking | Implemented + tested |
-| `essenty-back-handler` | Priority-ordered dispatch, enable/disable, regular + predictive (`start/progress/cancel/invoke`) gesture model with gesture claiming | Implemented + tested |
-| `essenty-android` | Rust NativeActivity lifecycle, ordinary Back key and saved-state byte bridge; host-testable mappings | NativeActivity compile-tested; AndroidX and predictive back planned |
-| `essenty-apple` | Application notifications through `objc2` on macOS, iOS, tvOS, visionOS, Catalyst, and watchOS | Native observers compile-tested; device tests planned |
-| `essenty-web` | Automatic visibility and page transition observation; opt-in `popstate` listener and browser storage persistence | WASM compile-tested; browser tests planned |
+| Crate | Role | Origin | Status |
+|---|---|---|---|
+| `essenty` | Umbrella facade re-exporting the core APIs (`essenty = "0.1"`) | Rust extension | Implemented |
+| `essenty-lifecycle` | Ordered states and lifecycle subscriptions | Upstream Essenty behavior | Implemented; unit tested |
+| `essenty-state-keeper` | Byte providers, restore consumption, pluggable codecs | Upstream Essenty behavior, Rust codec extension | Implemented; unit tested |
+| `essenty-instance-keeper` | Retained objects and deterministic cleanup | Upstream Essenty behavior | Implemented; unit tested |
+| `essenty-back-handler` | Regular and predictive back dispatch, including gesture position | Upstream Essenty behavior, Rust API | Implemented; unit tested |
+| `essenty-android` | NativeActivity lifecycle, Back key, and saved-state bytes; AndroidX packaging proof | NativeActivity: Rust extension. AndroidX: Upstream Essenty target | NativeActivity compile-tested; AndroidX packaging build-tested; AndroidX runtime integration planned |
+| `essenty-apple` | Application notifications through `objc2` | Rust extension | macOS runtime-tested; other Apple targets compile-tested |
+| `essenty-web` | Browser lifecycle, history, and storage | Rust extension | Compile-tested; browser runtime testing planned |
 
 The umbrella `essenty` crate optionally provides `Runtime`, `PlatformEvent`, and
 `DispatchResult` behind the `runtime` feature. None of the four primitives or
@@ -160,6 +161,8 @@ let _subscription = lifecycle.registry().subscribe(|state| {
 ```
 
 See the platform guides for the supported Rust host models and their limits.
+The [AndroidX packaging analysis](docs/ANDROIDX_INTEGRATION.md) explains why
+`cargo add essenty` alone cannot add AndroidX classes to an APK.
 
 ## Build / test / lint
 
