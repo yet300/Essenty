@@ -1,23 +1,11 @@
-//! Android adapter for the Essenty Rust runtime.
+//! Rust-native adapters for Android Essenty semantics.
 //!
-//! Host-compilable mapping adapters coexist with optional native-activity
-//! integration. `AndroidX` owner attachment still requires additional host glue.
-//!
-//! `AndroidX` behavior still to integrate:
-//!
-//! - `Activity` lifecycle callbacks → [`AndroidLifecycle`]
-//! - `SavedStateRegistry` save/restore → [`AndroidStateHost`]
-//! - `ViewModelStore` retention → core `InstanceKeeper` (already usable)
-//! - `OnBackPressedDispatcher` + Android Predictive Back → [`AndroidBackBridge`]
-//!
-//! All Android/JNI dependencies must live behind
-//! `target.'cfg(target_os = "android")'.dependencies` in this crate and must
-//! never leak into the core crates.
-//!
-//! On Android, the optional `native-activity` feature provides
-//! `NativeActivityLifecycle` and `NativeActivityState`, which drive lifecycle
-//! and saved-state restoration through the `android-activity` event loop. No
-//! application-written Java is needed for that host model.
+//! The optional `native-activity` feature integrates Lifecycle, `StateKeeper`,
+//! and `BackHandler` with `android-activity` `NativeActivity` and direct platform
+//! APIs. `AndroidX` is not part of the primary backend. `InstanceKeeper` retention
+//! across Activity recreation is not yet implemented because the core keeper
+//! is thread-confined and `NativeActivity` does not provide a proven handoff.
+//! Android/JNI dependencies stay inside this crate and never enter core crates.
 //!
 //! # Example
 //!
@@ -32,11 +20,15 @@
 //! ```
 
 mod back_handler;
+#[cfg(all(target_os = "android", feature = "native-activity"))]
+mod back_handler_platform;
 mod lifecycle;
 mod native_state;
 mod state_keeper;
 
 pub use back_handler::AndroidBackBridge;
+#[cfg(all(target_os = "android", feature = "native-activity"))]
+pub use back_handler_platform::{AndroidBackError, AndroidBackHandler, AndroidBackStrategy};
 pub use lifecycle::AndroidLifecycle;
 #[cfg(all(target_os = "android", feature = "native-activity"))]
 pub use native_state::NativeActivityState;

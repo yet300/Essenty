@@ -81,13 +81,16 @@ impl NativeActivityLifecycle {
     where
         F: FnMut(&InputEvent<'_>) -> InputStatus,
     {
+        let modern_back_api = jni_min_helper::android_api_level() >= 33;
         let mut input = self.app.input_events_iter()?;
         while input.next(|event| match event {
-            InputEvent::KeyEvent(key) if key.key_code() == Keycode::Back => match key.action() {
-                KeyAction::Down if back.can_handle() => InputStatus::Handled,
-                KeyAction::Up if back.back() => InputStatus::Handled,
-                _ => fallback(event),
-            },
+            InputEvent::KeyEvent(key) if !modern_back_api && key.key_code() == Keycode::Back => {
+                match key.action() {
+                    KeyAction::Down if back.can_handle() => InputStatus::Handled,
+                    KeyAction::Up if back.back() => InputStatus::Handled,
+                    _ => fallback(event),
+                }
+            }
             _ => fallback(event),
         }) {}
         Ok(())

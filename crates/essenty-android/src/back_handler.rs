@@ -1,11 +1,11 @@
 use essenty_back_handler::{BackDispatcher, GesturePosition};
 
-/// Forwards `OnBackPressedDispatcher` / Predictive Back events into a core
-/// [`BackDispatcher`].
+/// Host-testable event mapping into the core [`BackDispatcher`]. The
+/// Android-only `AndroidBackHandler` owns direct
+/// platform callback registration.
 ///
-/// The future JNI layer will call `handle_back_pressed`,
-/// `handle_gesture_start`, and so on from dispatcher callbacks; until then
-/// this bridge documents the mapping and stays fully testable on the host.
+/// The NativeActivity proxy adapter and host tests both use the same mapping
+/// methods. This type itself remains platform agnostic and host-testable.
 #[derive(Debug, Default)]
 pub struct AndroidBackBridge {
     dispatcher: BackDispatcher,
@@ -16,6 +16,11 @@ impl AndroidBackBridge {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    #[cfg(all(target_os = "android", feature = "native-activity"))]
+    pub(crate) fn with_dispatcher(dispatcher: BackDispatcher) -> Self {
+        Self { dispatcher }
     }
 
     /// Borrows the dispatcher mutably for callback registration.
@@ -30,7 +35,7 @@ impl AndroidBackBridge {
         &self.dispatcher
     }
 
-    /// `OnBackPressedDispatcher.onBackPressed` equivalent.
+    /// Ordinary platform back equivalent.
     pub fn handle_back_pressed(&mut self) -> bool {
         self.dispatcher.back()
     }
