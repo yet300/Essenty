@@ -108,16 +108,21 @@ Tokio-free).
 | Upstream | Rust |
 |---|---|
 | `CoroutineScopeWithLifecycle` / `coroutineScope()` / `withLifecycle` (cancel on destroy; inactive when created destroyed) | `LifecycleScope`: destroy aborts every owned task, scope drop aborts + unsubscribes, spawn after destroy is `SpawnError::Destroyed` (scope tests) |
-| `Lifecycle.repeatOnLifecycle` (reject `INITIALIZED`; immediate return on `DESTROYED`; cancel/relaunch across active states; Mutex against overlap; unsubscribe in `finally`) | `repeat_on_lifecycle` over `CREATED`/`STARTED`/`RESUMED`: `RepeatError::InvalidMinState` for `INITIALIZED`, immediate `Ok` on `DESTROYED`, factory-reconstructed (never paused) child per entry, abort-then-await before restart so rapid `START → STOP → START` never overlaps, RAII unsubscription on completion/external cancellation (repeat tests, incl. rapid + external-cancel + destroy cases) |
+| `Lifecycle.repeatOnLifecycle` (reject `INITIALIZED`; immediate return on `DESTROYED`; cancel/relaunch across active states; Mutex against overlap; unsubscribe in `finally`) | `repeat_on_lifecycle` over `CREATED`/`STARTED`/`RESUMED`: `RepeatError::InvalidMinState` for `INITIALIZED`, immediate `Ok` on `DESTROYED`, factory-reconstructed (never paused) child per entry, abort-then-await before restart so rapid `START → STOP → START` never overlaps, RAII unsubscription on completion/external cancellation (repeat tests, incl. rapid + external-cancel + destroy cases); `repeat_on_lifecycle_local` shares the same state machine for `!Send` block futures (local tests with `Rc`/`RefCell` across await) |
 | `Flow.withLifecycle` | Deferred: no `Stream` adapter. Upstream it is a thin wrapper over `repeatOnLifecycle`; scope + repeat cover the capability without a new framework. |
 | `Dispatchers.Main.immediateOrFallback` | Intentionally absent: Tokio has no UI-main equivalent; platform dispatch belongs to a future UI integration. |
 
 Dependency direction is `essenty-lifecycle-tokio → essenty-lifecycle → core`;
-no core crate depends on Tokio (verified via dependency tree). Scope and
-repeat future are `!Send` (lifecycle thread); only spawned/block futures
-require `Send + 'static`. `spawn_local` is deferred (hidden `LocalSet`
-ownership not justified); `tokio::task::LocalSet::spawn_local` remains the
-direct route for `Rc`/`RefCell` work.
+no core crate depends on Tokio (verified via dependency tree). Scope and both
+repeat futures are `!Send` (lifecycle thread). `Send` and thread-local work
+are separate explicit APIs sharing one internal state machine:
+`spawn` / `repeat_on_lifecycle` take `Send + 'static` children run on Tokio
+workers, while `spawn_local` / `repeat_on_lifecycle_local` take
+`Future + 'static` children run on the owning thread's `LocalSet` (which the
+scope never creates; Tokio offers no non-panicking probe for that context, so
+the local APIs propagate its panic by contract). Scope construction is
+`with_handle` (explicit), `try_new` (typed `ScopeError` outside a runtime),
+or the panicking convenience `new`.
 
 ## 5. lifecycle-reaktive assessment
 
@@ -238,9 +243,10 @@ Upstream refs: `BackHandler.kt`, `BackHandlerOwner.kt`, `BackDispatcher.kt`,
 - `BackEvent` progress-range clamping (intentional validation difference;
   reversible without breakage if Decompose needs it).
 - Executor-neutral async/reactive bridges: implemented as the optional
-  `essenty-lifecycle-tokio` crate (scope + repeat; streams/`spawn_local`
-  deferred with recorded rationale). No core Tokio dependency; no new
-  executor or reactive framework.
+  `essenty-lifecycle-tokio` crate (scope + repeat in both `Send` and
+  thread-local flavors sharing one state machine; streams deferred with
+  recorded rationale). No core Tokio dependency; no new executor or reactive
+  framework.
 
 ## 12. Conclusions
 

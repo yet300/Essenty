@@ -17,6 +17,8 @@ only, per the audit's scope boundary.)
 | Retained instances per component | `InstanceKeeper` (`get_or_create`/`put`/`get`/`remove`/`destroy`, `Drop` cleanup, `destroy_all` at scope end) | None |
 | Back handling per component | `BackDispatcher` (priority + enabled + predictive gestures + aggregate listeners for native sync) | Parent/child propagation is Decompose-rs design work (upstream has no such abstraction either) |
 | Lifecycle-bound cleanup (coroutine cancel, disposable dispose) | `do_on_destroy` + RAII, plus optional `essenty-lifecycle-tokio` (`LifecycleScope`, `repeat_on_lifecycle`) | None — core stays executor-neutral; Tokio lives only in the optional integration |
+| `Send` component async work | `LifecycleScope::spawn`, `repeat_on_lifecycle` (`Send + 'static` children on Tokio workers) | None |
+| Thread-local component async work (`Rc`, `RefCell`, …) | `LifecycleScope::spawn_local`, `repeat_on_lifecycle_local` (no `Send` bound, driven by the owning thread's `LocalSet`) | None — the scope creates no `LocalSet`; the host owns it |
 
 ## Constraints check (all satisfied)
 
@@ -33,7 +35,10 @@ only, per the audit's scope boundary.)
 - No executor lock-in: core is synchronous; the optional Tokio bridge
   (`LifecycleScope` destroy→cancel, `repeat_on_lifecycle` start/stop relaunch)
   is expressible without new core APIs, and a component can own a
-  `LifecycleScope` so its async tasks die with its lifecycle.
+  `LifecycleScope` so its async tasks die with its lifecycle. `Send` work uses
+  `spawn` / `repeat_on_lifecycle`; thread-local component work (`Rc`,
+  `RefCell`) uses `spawn_local` / `repeat_on_lifecycle_local` on the owning
+  thread's `LocalSet` — no `ComponentContext` changes to core required.
 
 ## Ownership sketch (thought experiment, not committed API)
 
