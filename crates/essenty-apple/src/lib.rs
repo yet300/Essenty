@@ -5,7 +5,8 @@
 //! genuinely OS-specific behavior gets its own module, gated with
 //! `cfg(target_vendor = "apple")` plus OS checks where required.
 //!
-//! Platform-specific [`ApplicationLifecycle`] observers use `objc2` to follow
+//! Platform-specific `ApplicationLifecycle` observers (one per Apple OS, each
+//! available only on its target) use `objc2` to follow
 //! `AppKit`, `UIKit`, or `WatchKit` application notifications. The shared
 //! [`AppleLifecycle`] mapping remains available on every target.
 //!
