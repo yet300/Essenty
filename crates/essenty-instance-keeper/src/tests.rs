@@ -122,3 +122,53 @@ fn terminal_destroy_is_idempotent_and_rejects_new_instances() {
     assert!(keeper.is_empty());
     assert_eq!(keeper.get_or_create("new", || 4_u32).unwrap_err(), InstanceKeeperError::Destroyed);
 }
+
+#[test]
+fn put_retains_prebuilt_instance_and_rejects_duplicates() {
+    let mut keeper = InstanceKeeper::new();
+    let a = keeper.put("model", vec![1, 2, 3]).unwrap();
+    assert_eq!(*a, vec![1, 2, 3]);
+    // Same key and type returns the same Rc through get_or_create.
+    let b: StdRc<Vec<i32>> = keeper.get_or_create("model", || vec![9]).unwrap();
+    assert!(StdRc::ptr_eq(&a, &b));
+    assert_eq!(
+        keeper.put("model", vec![4]).unwrap_err(),
+        InstanceKeeperError::DuplicateKey("model".to_owned())
+    );
+    // Original value intact.
+    assert_eq!(*keeper.get::<Vec<i32>>("model").unwrap().unwrap(), vec![1, 2, 3]);
+}
+
+#[test]
+fn put_after_destroy_is_rejected() {
+    let mut keeper = InstanceKeeper::new();
+    keeper.destroy_all();
+    assert_eq!(keeper.put("k", 1_u32).unwrap_err(), InstanceKeeperError::Destroyed);
+}
+
+#[test]
+fn remove_returns_instance_without_destroying_it() {
+    let drops = StdRc::new(Cell::new(0_u32));
+    let mut keeper = InstanceKeeper::new();
+    keeper.put("p", Probe(StdRc::clone(&drops))).unwrap();
+    let removed: Option<StdRc<Probe>> = keeper.remove("p").unwrap();
+    assert!(keeper.is_empty());
+    assert!(!keeper.contains("p"));
+    // Keeper released ownership, but the returned Rc keeps the value alive.
+    assert_eq!(drops.get(), 0);
+    drop(removed);
+    assert_eq!(drops.get(), 1);
+}
+
+#[test]
+fn remove_absent_key_returns_none_and_mismatch_keeps_value() {
+    let mut keeper = InstanceKeeper::new();
+    assert_eq!(keeper.remove::<u32>("missing").unwrap(), None);
+    keeper.put("k", 1_u32).unwrap();
+    assert_eq!(
+        keeper.remove::<String>("k").unwrap_err(),
+        InstanceKeeperError::TypeMismatch("k".to_owned())
+    );
+    assert!(keeper.contains("k"));
+    assert_eq!(*keeper.get::<u32>("k").unwrap().unwrap(), 1);
+}
