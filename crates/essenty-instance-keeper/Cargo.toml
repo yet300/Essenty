@@ -9,6 +9,7 @@ homepage.workspace = true
 description = "Pure Rust retained-object keeper: ViewModel-like retention with deterministic Drop cleanup."
 categories.workspace = true
 keywords.workspace = true
+readme.workspace = true
 
 [dependencies]
 thiserror = { workspace = true }

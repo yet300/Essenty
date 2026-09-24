@@ -204,9 +204,9 @@ no accidental cloning on hot paths.
 
 - Metadata: all 8 crates carry workspace-inherited description/repository/
   homepage/license/keywords/categories; version `0.1.0`, edition 2024,
-  `rust-version = "1.85"`. Effectively publishing-ready except CHANGELOG/README
+  `rust-version = "1.96.0"`. Effectively publishing-ready except CHANGELOG/README
   per crate — acceptable pre-0.1, no publish performed.
-- MSRV/toolchain: `rust-version = 1.85`, edition 2024; CI tracks stable.
+- MSRV/toolchain: `rust-version = 1.96.0`, edition 2024; CI tracks stable.
   No MSRV advertised beyond the manifest field; verified with current stable
   in this audit.
 - Documentation: crate-level docs + platform guides + parity docs

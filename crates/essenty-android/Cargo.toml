@@ -9,6 +9,7 @@ homepage.workspace = true
 description = "Android adapter for the Essenty Rust runtime (Activity lifecycle, saved state, back dispatch)."
 categories.workspace = true
 keywords.workspace = true
+readme = "README.md"
 
 [features]
 default = []

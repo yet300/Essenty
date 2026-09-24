@@ -60,10 +60,10 @@ impl Subscription {
     }
 
     fn remove(&mut self) {
-        if let Some(guard) = self.inner.take() {
-            if let Some(registry) = guard.registry.upgrade() {
-                registry.borrow_mut().observers.retain(|(id, _)| *id != guard.id);
-            }
+        if let Some(guard) = self.inner.take()
+            && let Some(registry) = guard.registry.upgrade()
+        {
+            registry.borrow_mut().observers.retain(|(id, _)| *id != guard.id);
         }
     }
 }
@@ -403,10 +403,8 @@ impl LifecycleRegistry {
                 previous.set(state);
                 if seen_from == from && state == to && (!once || !fired.get()) {
                     fired.set(true);
-                    if once {
-                        if let Some(id) = id_slot.get() {
-                            let _ = registry.unsubscribe(id);
-                        }
+                    if once && let Some(id) = id_slot.get() {
+                        let _ = registry.unsubscribe(id);
                     }
                     callback();
                 }
@@ -415,10 +413,11 @@ impl LifecycleRegistry {
         id_slot.set(subscription.id());
         // A one-shot helper may already have fired during subscription replay
         // before its id was known; ensure it is unsubscribed exactly once.
-        if once && fired.get() {
-            if let Some(id) = id_slot.get() {
-                let _ = self.unsubscribe(id);
-            }
+        if once
+            && fired.get()
+            && let Some(id) = id_slot.get()
+        {
+            let _ = self.unsubscribe(id);
         }
         subscription
     }

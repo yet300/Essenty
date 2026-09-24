@@ -9,6 +9,7 @@ homepage.workspace = true
 description = "Cross-platform application lifecycle/state runtime (Essenty-inspired, Rust-native)."
 categories.workspace = true
 keywords.workspace = true
+readme.workspace = true
 
 [features]
 default = []

@@ -9,6 +9,7 @@ homepage.workspace = true
 description = "Apple-family adapter for the Essenty Rust runtime (iOS, macOS, watchOS, tvOS, visionOS, Mac Catalyst)."
 categories.workspace = true
 keywords.workspace = true
+readme.workspace = true
 
 [dependencies]
 essenty-lifecycle = { workspace = true }

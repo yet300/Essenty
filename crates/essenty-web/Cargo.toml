@@ -9,6 +9,7 @@ homepage.workspace = true
 description = "Web/WASM adapter for the Essenty Rust runtime (visibility, history, storage)."
 categories.workspace = true
 keywords.workspace = true
+readme.workspace = true
 
 [dependencies]
 essenty-lifecycle = { workspace = true }

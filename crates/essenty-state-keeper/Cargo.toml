@@ -9,6 +9,7 @@ homepage.workspace = true
 description = "Pure Rust state preservation: byte-oriented providers with pluggable serde codecs."
 categories.workspace = true
 keywords.workspace = true
+readme.workspace = true
 
 [dependencies]
 serde = { workspace = true }

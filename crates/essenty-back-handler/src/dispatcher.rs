@@ -375,11 +375,11 @@ impl BackDispatcher {
     fn dispatch_to(&mut self, id: u64, event: BackEvent, force: bool) -> bool {
         let mut commands = BackCommands { next_id: &mut self.next_id, pending: Vec::new() };
         let mut handled = false;
-        if let Some(entry) = self.entries.get_mut(&id) {
-            if entry.enabled || force {
-                (entry.callback)(event, &mut commands);
-                handled = true;
-            }
+        if let Some(entry) = self.entries.get_mut(&id)
+            && (entry.enabled || force)
+        {
+            (entry.callback)(event, &mut commands);
+            handled = true;
         }
         for command in commands.pending {
             match command {

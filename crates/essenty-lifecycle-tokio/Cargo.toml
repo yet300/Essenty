@@ -9,6 +9,7 @@ homepage.workspace = true
 description = "Tokio integration for essenty-lifecycle: lifecycle-bound task scope and repeat-on-lifecycle."
 categories.workspace = true
 keywords.workspace = true
+readme = "README.md"
 
 [dependencies]
 essenty-lifecycle = { workspace = true }

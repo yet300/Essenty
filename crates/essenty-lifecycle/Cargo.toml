@@ -9,6 +9,7 @@ homepage.workspace = true
 description = "Pure Rust lifecycle abstraction: states, validated transitions, and RAII subscriptions."
 categories.workspace = true
 keywords.workspace = true
+readme.workspace = true
 
 [dependencies]
 thiserror = { workspace = true }

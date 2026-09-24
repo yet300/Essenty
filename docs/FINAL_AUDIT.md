@@ -114,3 +114,13 @@ Decompose-rs itself is out of scope for this task.
 ## Git
 
 Recorded at push time (see final report message for SHAs and verification).
+
+## Release audit (v0.1.0)
+
+```text
+Upstream Essenty SHA used for 0.1.0: c4f1e914185daa21de4867716a102b44b9a945a3
+Essenty-rs release commit: will record on main
+Crates.io release: 0.1.0
+MSRV: 1.96.0
+Package metadata: workspace and crate READMEs configured
+```

@@ -9,6 +9,7 @@ homepage.workspace = true
 description = "Pure Rust back-event dispatcher with predictive gesture support."
 categories.workspace = true
 keywords.workspace = true
+readme.workspace = true
 
 [dependencies]
 thiserror = { workspace = true }

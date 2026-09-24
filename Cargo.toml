@@ -26,13 +26,14 @@ default-members = [
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.96.0"
 license = "Apache-2.0"
 repository = "https://github.com/yet300/Essenty"
 homepage = "https://github.com/yet300/Essenty"
 authors = ["Essenty Rust Contributors"]
 categories = ["development-tools", "gui"]
 keywords = ["lifecycle", "state", "navigation", "cross-platform", "essenty"]
+readme = "README.md"
 
 [workspace.dependencies]
 serde = { version = "1", default-features = false, features = ["derive", "alloc"] }
