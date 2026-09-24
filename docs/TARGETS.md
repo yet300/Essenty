@@ -22,9 +22,9 @@ precisely.
 | Mac Catalyst | `aarch64-apple-ios-macabi`, `x86_64-apple-ios-macabi` |
 
 On 2026-09-24, `cargo check --workspace --target <triple>` passed locally for
-all 21 triples after the AndroidX packaging work. The
-`essenty-android/native-activity` feature also passed for both listed Android
-triples.
+all 21 triples during the NativeActivity migration. The
+`essenty-android/native-activity` feature also passed for both Android targets:
+`aarch64-linux-android` and `x86_64-linux-android`.
 
 `cargo check` is a compile check only. Host tests exercise the four core
 primitives and mapping helpers. Neither cross-compilation nor a simulator SDK

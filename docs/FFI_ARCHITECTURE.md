@@ -24,8 +24,9 @@ owns browser closures and removes listeners on drop. The Android
 ## Native boundaries
 
 - Android NativeActivity uses `android-activity`'s Rust API, whose host glue
-  bridges Android framework events. `essenty-android` contains no direct JNI or
-  consumer-facing Java API at present. AndroidX integration is still planned.
+  bridges Android framework events. The Android-only back adapter uses JNI
+  and `jni-min-helper` internally for platform callback registration; no
+  consumer-facing Java API is required.
 - Apple application lifecycle observers are implemented in Rust with `objc2`,
   `objc2-foundation`, and UIKit or AppKit bindings. Unsafe calls are limited to
   observer registration, initialization, and removal. Selectors correspond to
@@ -35,15 +36,16 @@ owns browser closures and removes listeners on drop. The Android
 
 StateKeeper's core values remain opaque bytes. A platform adapter must choose
 an outer persistence encoding without imposing JSON, Bundle, or property lists
-on the core. A future AndroidX adapter also needs to define ownership of a
-`SavedStateRegistryOwner` and `ViewModelStoreOwner`; Cargo cannot inject those
-objects into an arbitrary existing Android Activity by adding a Rust dependency.
+on the core. NativeActivity persists that envelope through its native saved
+state callbacks. Retained-instance handoff remains unimplemented until
+thread ownership and stale-recreation cleanup can be proved.
 
 ## Back navigation
 
 The core accepts ordinary and predictive back events, including progress.
-`NativeActivityLifecycle` handles the ordinary Back key when the application
-uses its input wrapper. AndroidX predictive back is not wired yet. On Web,
+`NativeActivityLifecycle` routes ordinary key back below API 33. The Android
+adapter uses `OnBackInvokedCallback` on API 33 and
+`OnBackAnimationCallback` on API 34+ through a private dynamic proxy. On Web,
 `popstate` arrives after history navigation; a callback result cannot cancel
 that history change. The Web bridge is explicit and does not install a global
 navigation interceptor.

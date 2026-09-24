@@ -10,8 +10,8 @@ inside platform adapters where operating system APIs require it.
 > macOS, UIKit, Web, and Rust NativeActivity lifecycle adapters now observe
 > real platform events, with the verification levels and gaps documented in
 > [Android](docs/ANDROID.md), [Apple](docs/APPLE.md), and [Web](docs/WEB.md).
-> AndroidX owner attachment is still planned. The AndroidX packaging path is
-> build-tested separately from NativeActivity; it is not runtime parity.
+> Android uses NativeActivity and direct platform APIs. AndroidX is not part of
+> the primary backend.
 
 This project is **not** affiliated with the Essenty authors. No Essenty source
 code was copied; only public behavioral concepts (lifecycle states, saved
@@ -55,7 +55,7 @@ Android  Apple      Web
 | `essenty-state-keeper` | Byte providers, restore consumption, pluggable codecs | Upstream Essenty behavior, Rust codec extension | Implemented; unit tested |
 | `essenty-instance-keeper` | Retained objects and deterministic cleanup | Upstream Essenty behavior | Implemented; unit tested |
 | `essenty-back-handler` | Regular and predictive back dispatch, including gesture position | Upstream Essenty behavior, Rust API | Implemented; unit tested |
-| `essenty-android` | NativeActivity lifecycle, Back key, and saved-state bytes; AndroidX packaging proof | NativeActivity: Rust extension. AndroidX: Upstream Essenty target | NativeActivity compile-tested; AndroidX packaging build-tested; AndroidX runtime integration planned |
+| `essenty-android` | NativeActivity lifecycle/state and direct platform back callbacks | Rust extension for Android Essenty semantics | Android target compile-tested; predictive proxy runtime proof on API 36; API 33 and full integration runtime checks pending |
 | `essenty-apple` | Application notifications through `objc2` | Rust extension | macOS runtime-tested; other Apple targets compile-tested |
 | `essenty-web` | Browser lifecycle, history, and storage | Rust extension | Compile-tested; browser runtime testing planned |
 
@@ -161,8 +161,6 @@ let _subscription = lifecycle.registry().subscribe(|state| {
 ```
 
 See the platform guides for the supported Rust host models and their limits.
-The [AndroidX packaging analysis](docs/ANDROIDX_INTEGRATION.md) explains why
-`cargo add essenty` alone cannot add AndroidX classes to an APK.
 
 ## Build / test / lint
 

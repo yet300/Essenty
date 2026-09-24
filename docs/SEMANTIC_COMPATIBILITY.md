@@ -4,13 +4,14 @@
 
 | Integration | Origin | Status |
 |---|---|---|
-| AndroidX Lifecycle, SavedStateRegistry, ViewModelStore, back | Upstream Essenty | Planned; AndroidX dependencies packaged in a build-tested APK, no JNI/runtime bridge |
-| NativeActivity lifecycle, state, ordinary Back key | Rust extension | Implemented; Android target compile-tested, host mappings unit-tested |
+| NativeActivity lifecycle and saved state; direct `android.window` back callbacks | Rust extension | Implemented/compile-checked; API 36 dynamic-proxy PoC runtime-tested; API 33 and production-adapter runtime checks pending |
 | Browser lifecycle, history, storage | Rust extension | Implemented; WASM compile-tested, browser runtime tests planned |
 | macOS application lifecycle | Rust extension | Implemented; runtime-tested |
 | UIKit/WatchKit application lifecycle | Rust extension | Implemented; compile-tested |
 
-See [AndroidX integration](ANDROIDX_INTEGRATION.md) for the packaging boundary.
+The Android adapter intentionally uses NativeActivity and direct Android APIs,
+not upstream's AndroidX integration classes. See [Android](ANDROID.md) for the
+runtime verification boundaries.
 
 Reference: upstream Essenty commit [`c4f1e914185daa21de4867716a102b44b9a945a3`](https://github.com/arkivanov/Essenty/tree/c4f1e914185daa21de4867716a102b44b9a945a3), inspected 2026-09-23. This is a behavioral comparison, not a Kotlin API port. A `MATCHES` label means a Rust regression test covers the stated behavior; it does not claim general equivalence.
 
@@ -75,7 +76,7 @@ Upstream references: [dispatcher](https://github.com/arkivanov/Essenty/blob/c4f1
 | Removing selected handler cancels it; later progress selects fallback | MATCHES | `removed_gesture_owner_is_cancelled_and_fallback_starts_on_progress` |
 | Disabling selected handler does not break in-flight claim | MATCHES | `disabling_gesture_owner_does_not_interrupt_claim` |
 | Handler changes registration during callback | INTENTIONALLY DIFFERENT | Rust queues changes through `BackCommands` and applies them immediately after callback return, avoiding mutable aliasing. `callback_can_unregister_itself_and_register_successor` covers self-removal and registration. |
-| Progress carries gesture position and swipe edge | INTENTIONALLY DIFFERENT | Core currently carries progress only. Native visual animation can retain edge/coordinates; a future semantic consumer can justify adding them. |
+| Progress carries gesture position and swipe edge | MATCHES | `GesturePosition` carries edge and touch coordinates; platform adapters preserve the complete `BackEvent` data. |
 | Progress/cancel/commit without start | INTENTIONALLY DIFFERENT | Rust reports `NoGestureInProgress`; upstream ignores stray progress/cancel. An explicit error helps adapters detect wiring mistakes. |
 | Dynamic priority changes | TODO | Rust priority is fixed at registration; upstream callback priority is mutable. |
 | Aggregate enabled-change listeners | TODO | Rust exposes `can_handle` in each runtime result. A push listener may be needed for native back registration when Rust callbacks change enabled state between platform events. |
@@ -86,9 +87,10 @@ Upstream references: [dispatcher](https://github.com/arkivanov/Essenty/blob/c4f1
 
 | Behavior | Status | Rust evidence / decision |
 |---|---|---|
-| Android `Activity` lifecycle to core lifecycle | TODO | `NativeActivityLifecycle` now observes the `android-activity` Rust host event loop; arbitrary AndroidX `LifecycleOwner` binding is not implemented. Cross-compiled only. |
-| Android saved state and retained objects | TODO | `NativeActivityState` restores and saves a versioned byte container through `android-activity`'s `StateLoader` and `StateSaver`. `AndroidStateHost` remains a mapping helper; AndroidX `SavedStateRegistry` and `ViewModelStore` are not attached. No AndroidX equivalence claim. |
-| Android ordinary/predictive back | TODO | NativeActivity Back key dispatch is wired; AndroidX callback priority and predictive progress are not yet wired. |
+| Android lifecycle | IMPLEMENTED; runtime pending | `NativeActivityLifecycle` observes the `android-activity` event loop. It is a NativeActivity adapter and does not mirror AndroidX owner attachment timing. |
+| Android saved state | IMPLEMENTED; emulator recreation pending | `NativeActivityState` uses a versioned, checksummed binary envelope and native `StateLoader`/`StateSaver`; old `EST1` snapshots remain readable. |
+| Android retained instances | NOT IMPLEMENTED | Core values are `Rc`-owned and thread-confined. NativeActivity does not yet provide a proven cross-recreation handoff plus deterministic stale-token cleanup. |
+| Android back | IMPLEMENTED; API 33 and integrated runtime pending | API <33 uses NativeActivity input; API 33 uses `OnBackInvokedCallback`; API 34+ uses `OnBackAnimationCallback`. Core dispatcher owns priority and gesture selection. |
 | Apple application lifecycle | INTENTIONALLY DIFFERENT | macOS, UIKit and WatchKit adapters observe process-wide notifications with `objc2`; they do not model individual scenes. macOS synthetic notification delivery and observer removal were runtime-tested; UIKit and WatchKit were compile-tested only. |
 | Browser lifecycle | INTENTIONALLY DIFFERENT | Visibility and `pagehide`/`pageshow` listeners are wired. A persisted `pagehide` leaves the registry restorable; `persisted_page_hide_preserves_lifecycle_for_bfcache` covers the mapping. Browser delivery remains untested. |
 | Browser back | NOT APPLICABLE | The opt-in `BrowserHistoryBack` listener forwards `popstate` after history navigation and cannot cancel it. It does not claim upstream Android back semantics. |
