@@ -15,6 +15,10 @@ runtime verification boundaries and the configuration-retention contract.
 
 Reference: upstream Essenty commit [`c4f1e914185daa21de4867716a102b44b9a945a3`](https://github.com/arkivanov/Essenty/tree/c4f1e914185daa21de4867716a102b44b9a945a3), inspected 2026-09-23. This is a behavioral comparison, not a Kotlin API port. A `MATCHES` label means a Rust regression test covers the stated behavior; it does not claim general equivalence.
 
+Full audit matrices: [Upstream parity](UPSTREAM_PARITY_AUDIT.md),
+[Platform parity](PLATFORM_PARITY.md), [Public API](PUBLIC_API_AUDIT.md),
+[Decompose readiness](DECOMPOSE_READINESS.md).
+
 ## Lifecycle
 
 Upstream references: [registry implementation](https://github.com/arkivanov/Essenty/blob/c4f1e914185daa21de4867716a102b44b9a945a3/lifecycle/src/commonMain/kotlin/com/arkivanov/essenty/lifecycle/LifecycleRegistryImpl.kt), [registry extensions](https://github.com/arkivanov/Essenty/blob/c4f1e914185daa21de4867716a102b44b9a945a3/lifecycle/src/commonMain/kotlin/com/arkivanov/essenty/lifecycle/LifecycleRegistryExt.kt), [tests](https://github.com/arkivanov/Essenty/blob/c4f1e914185daa21de4867716a102b44b9a945a3/lifecycle/src/commonTest/kotlin/com/arkivanov/essenty/lifecycle/LifecycleRegistryTest.kt).
@@ -29,6 +33,7 @@ Upstream references: [registry implementation](https://github.com/arkivanov/Esse
 | Callback can destroy registry during another callback | MATCHES | `callback_can_destroy_during_create` |
 | Strict event methods reject wrong predecessor | MATCHES | `invalid_strict_steps_are_rejected` |
 | Higher-level drive methods tolerate repeated events | INTENTIONALLY DIFFERENT | Rust uses `move_to` for idempotent host driving while `create/start/resume/pause/stop` are explicitly strict. This keeps invalid manual transitions observable as typed errors. Adapter tests cover duplicate host callbacks. |
+| `doOnCreate/doOnStart/doOnResume/doOnPause/doOnStop/doOnDestroy` + one-time variants | MATCHES | `do_on_create`, `do_on_start[_once]`, `do_on_resume[_once]`, `do_on_pause[_once]`, `do_on_stop[_once]`, `do_on_destroy` with direction tracked from consecutive deliveries (pause≠start, stop≠create); late-subscriber replay preserved; 8 regression tests |
 | Repeated destroy | INTENTIONALLY DIFFERENT | Rust returns `AlreadyDestroyed`; upstream convenience `destroy()` is a no-op. A typed terminal error exposes accidental double teardown to direct callers. |
 | Duplicate observer identity | INTENTIONALLY DIFFERENT | Rust registrations have unique tokens and may use the same closure value repeatedly. Kotlin rejects subscribing the same callback object twice. Tokens make removal unambiguous. |
 | Reentrancy where a callback drives a different transition mid-dispatch | TODO | `move_to` re-reads state after every callback event, but the exact nested notification order across arbitrary reentrant transitions needs a dedicated compatibility matrix. |
@@ -46,7 +51,7 @@ Upstream references: [dispatcher](https://github.com/arkivanov/Essenty/blob/c4f1
 | Unconsumed restored entries survive another save; live providers overwrite same keys | MATCHES | `unconsumed_restored_values_survive_another_save` |
 | Unregister leaves restored entry available | MATCHES | `unregister_removes_provider_but_keeps_restored` |
 | Unregister of absent key | INTENTIONALLY DIFFERENT | Rust returns `false`; Kotlin throws. Rust's explicit result makes idempotent cleanup practical. |
-| Provider may return no state | TODO | Kotlin skips a supplier returning null, preserving an older unconsumed restored value. Current Rust byte provider must return bytes; no skip variant exists. |
+| Provider may return no state | MATCHES | Kotlin skips a supplier returning null, preserving an older unconsumed restored value. Rust `register_optional`/`register_optional_value` skip on `None` with the same preservation rule; covered by 4 regression tests. |
 | Provider mutates registration during save | NOT APPLICABLE | Rust `save(&self)` and `register(&mut self)` exclude this through the public API; a provider cannot borrow the same keeper mutably safely during save. |
 | Codec ownership and failure | INTENTIONALLY DIFFERENT | Rust stores opaque bytes and lets callers choose codecs. Errors are typed; Kotlin stores serializable containers and serializer strategies. `serde_value_round_trip_with_pluggable_codec` and failure tests cover Rust behavior. |
 | Save order | INTENTIONALLY DIFFERENT | Rust `BTreeMap` evaluates providers by key, yielding reproducible snapshots. Kotlin `HashMap` does not promise a stable iteration order. `multiple_keys_save_in_order` covers Rust ordering. |
@@ -63,7 +68,7 @@ Upstream references: [contract](https://github.com/arkivanov/Essenty/blob/c4f1e9
 | Releasing a key permits a new value | MATCHES | `destroy_releases_and_allows_recreation` (Rust key removal is named `destroy`) |
 | Object cleanup at end of scope | INTENTIONALLY DIFFERENT | Rust `Drop` runs only after the last external `Rc` clone is released. Kotlin calls `onDestroy` at dispatcher scope end even when callers still reference the object. `value_drops_when_keeper_and_clones_are_gone` covers this ownership rule. |
 | Keys and type mismatch | INTENTIONALLY DIFFERENT | Rust uses string keys and returns `TypeMismatch`; Kotlin accepts `Any` keys and casts in typed helpers. `type_mismatch_returns_error_and_keeps_value` |
-| Explicit put/remove of prebuilt instance | TODO | Current Rust API is get/create oriented. Add only if a concrete component owner needs it. |
+| Explicit put/remove of prebuilt instance | MATCHES | `put` (duplicate → `DuplicateKey`) and `remove` (returns `Rc`, no destruction) mirror upstream `put`/`remove`; covered by 4 regression tests. |
 
 ### NativeActivity host semantics
 
@@ -87,13 +92,13 @@ Upstream references: [dispatcher](https://github.com/arkivanov/Essenty/blob/c4f1
 |---|---|---|
 | Highest enabled priority, then latest registration, handles back | MATCHES | `highest_priority_wins`, `later_registration_breaks_priority_ties`, `disabled_handler_is_skipped` |
 | Gesture claims selected handler; later registration does not steal it | MATCHES | `gesture_sticks_to_claimed_handler` |
-| Removing selected handler cancels it; later progress selects fallback | MATCHES | `removed_gesture_owner_is_cancelled_and_fallback_starts_on_progress` |
+| Removing selected handler cancels it; later progress selects fallback | MATCHES | `removed_gesture_owner_is_cancelled_and_fallback_starts_on_progress`; the fallback replays the original start event (`fallback_after_owner_removal_replays_original_start_event`). |
 | Disabling selected handler does not break in-flight claim | MATCHES | `disabling_gesture_owner_does_not_interrupt_claim` |
 | Handler changes registration during callback | INTENTIONALLY DIFFERENT | Rust queues changes through `BackCommands` and applies them immediately after callback return, avoiding mutable aliasing. `callback_can_unregister_itself_and_register_successor` covers self-removal and registration. |
 | Progress carries gesture position and swipe edge | MATCHES | `GesturePosition` carries edge and touch coordinates; platform adapters preserve the complete `BackEvent` data. |
 | Progress/cancel/commit without start | INTENTIONALLY DIFFERENT | Rust reports `NoGestureInProgress`; upstream ignores stray progress/cancel. An explicit error helps adapters detect wiring mistakes. |
-| Dynamic priority changes | TODO | Rust priority is fixed at registration; upstream callback priority is mutable. |
-| Aggregate enabled-change listeners | TODO | Rust exposes `can_handle` in each runtime result. A push listener may be needed for native back registration when Rust callbacks change enabled state between platform events. |
+| Dynamic priority changes | MATCHES | `set_priority`/`priority` mirror the mutable upstream `BackCallback.priority` (future gestures only, in-flight claim unaffected); `set_priority_changes_winner_selection`. |
+| Aggregate enabled-change listeners | MATCHES | `add_enabled_changed_listener`/`remove_enabled_changed_listener` fire only on aggregate flips (including queued `BackCommands` registrations); `enabled_changed_listeners_fire_only_on_aggregate_transitions`. |
 | Nested back dispatch and callback replacement during cancellation | TODO | The command queue prevents aliasing, but deeply nested behavior has not been exhaustively compared to upstream. |
 | Nested dispatcher composition | TODO | No parent/child back dispatcher abstraction exists yet. A component runtime should define propagation and ownership before introducing one. |
 

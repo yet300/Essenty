@@ -26,6 +26,11 @@ all 21 triples during the NativeActivity migration. The
 `essenty-android/native-activity` feature also passed for both Android targets:
 `aarch64-linux-android` and `x86_64-linux-android`.
 
+Re-verified 2026-09-24 in the full parity audit: all 21 triples
+`cargo check --workspace --target` PASS (installed toolchains listed in
+`PLATFORM_PARITY.md`), plus `native-activity` on both Android targets and
+`essenty-web` on `wasm32-unknown-unknown`.
+
 `cargo check` is a compile check only. Host tests exercise the four core
 primitives and mapping helpers. Neither cross-compilation nor a simulator SDK
 proves that a notification, Activity callback, or browser event was delivered

@@ -64,7 +64,11 @@ The umbrella `essenty` crate optionally provides `Runtime`, `PlatformEvent`, and
 platform adapters requires it. See
 [`docs/FFI_ARCHITECTURE.md`](docs/FFI_ARCHITECTURE.md) for ownership and FFI
 rules, and [`docs/SEMANTIC_COMPATIBILITY.md`](docs/SEMANTIC_COMPATIBILITY.md)
-for the audited upstream behavior and intentional Rust differences.
+for the audited upstream behavior and intentional Rust differences. Full audit
+matrices: [`docs/UPSTREAM_PARITY_AUDIT.md`](docs/UPSTREAM_PARITY_AUDIT.md),
+[`docs/PLATFORM_PARITY.md`](docs/PLATFORM_PARITY.md),
+[`docs/PUBLIC_API_AUDIT.md`](docs/PUBLIC_API_AUDIT.md),
+[`docs/DECOMPOSE_READINESS.md`](docs/DECOMPOSE_READINESS.md).
 
 ## Platforms
 
