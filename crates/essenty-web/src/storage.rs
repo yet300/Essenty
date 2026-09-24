@@ -74,9 +74,9 @@ pub(crate) fn decode_bytes(encoded: &str) -> Option<Vec<u8>> {
     }
 
     let mut bytes = Vec::with_capacity(encoded.len() / 2);
-    let mut chunks = encoded.as_bytes().chunks_exact(2);
-    for chunk in &mut chunks {
+    let (chunks, remainder) = encoded.as_bytes().as_chunks::<2>();
+    for chunk in chunks {
         bytes.push(digit(chunk[0])? << 4 | digit(chunk[1])?);
     }
-    chunks.remainder().is_empty().then_some(bytes)
+    remainder.is_empty().then_some(bytes)
 }
