@@ -1,0 +1,43 @@
+[package]
+name = "essenty-predictive-proxy-poc"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[features]
+invoke-only = []
+
+[lib]
+name = "essenty_predictive_proxy_poc"
+crate-type = ["cdylib"]
+
+[dependencies]
+android-activity = { version = "0.6.1", features = ["native-activity"] }
+android_logger = "0.15"
+essenty-back-handler = { path = "../../crates/essenty-back-handler" }
+jni = "0.22.4"
+jni-min-helper = "0.4.7"
+log = "0.4"
+
+[package.metadata.android]
+package = "dev.essenty.predictiveproxy"
+build_targets = ["aarch64-linux-android"]
+manifest_override = "AndroidManifest.xml"
+
+[package.metadata.android.sdk]
+min_sdk_version = 23
+target_sdk_version = 35
+
+[[package.metadata.android.application.activity]]
+name = "android.app.NativeActivity"
+exported = true
+
+[[package.metadata.android.application.activity.meta_data]]
+name = "android.app.lib_name"
+value = "essenty_predictive_proxy_poc"
+
+[[package.metadata.android.application.activity.intent_filter]]
+actions = ["android.intent.action.MAIN"]
+categories = ["android.intent.category.LAUNCHER"]
