@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 /// Hosts saved-state bytes across Android process recreation.
 ///
 /// Thin wrapper around [`StateKeeper`] documenting the intended
-/// `SavedStateRegistry` wiring: `consume` restored bytes once after
+/// Native saved-state wiring: `consume` restored bytes once after
 /// recreation, `register` live providers, then `perform_save` when the
 /// platform requests a snapshot. Byte format stays caller-defined.
 #[derive(Debug, Default)]
@@ -19,7 +19,7 @@ impl AndroidStateHost {
         Self::default()
     }
 
-    /// Host preloaded with bytes from `SavedStateRegistry.consumeRestoredStateForKey`
+    /// Host preloaded with bytes from `NativeActivityState::from_loader`
     /// equivalents.
     #[must_use]
     pub fn with_restored(restored: BTreeMap<String, Vec<u8>>) -> Self {
