@@ -1,4 +1,5 @@
 use super::*;
+use essenty_back_handler::{BackEvent, GesturePosition, SwipeEdge};
 use essenty_lifecycle::LifecycleState;
 
 #[test]
@@ -47,4 +48,20 @@ fn back_bridge_forwards_press_and_gesture() {
     assert!(bridge.handle_gesture_progress(0.5).unwrap());
     assert!(bridge.handle_gesture_invoke().unwrap());
     assert_eq!(*calls.borrow(), 4);
+}
+
+#[test]
+fn back_bridge_preserves_predictive_position() {
+    let mut bridge = AndroidBackBridge::new();
+    let events = std::rc::Rc::new(std::cell::RefCell::new(Vec::<BackEvent>::new()));
+    let probe = std::rc::Rc::clone(&events);
+    bridge.dispatcher_mut().register(0, true, move |event| probe.borrow_mut().push(event));
+
+    let position = GesturePosition { swipe_edge: SwipeEdge::Left, touch_x: 8.0, touch_y: 16.0 };
+    assert!(bridge.handle_gesture_start_with(position));
+    assert!(bridge.handle_gesture_progress_with(0.75, position).unwrap());
+    assert!(bridge.handle_gesture_invoke().unwrap());
+    assert_eq!(events.borrow()[0].position, Some(position));
+    assert_eq!(events.borrow()[1].position, Some(position));
+    assert_eq!(events.borrow()[1].progress, Some(0.75));
 }

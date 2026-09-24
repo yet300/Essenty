@@ -45,7 +45,9 @@ pub mod back_handler {
     pub use essenty_back_handler::*;
 }
 
-pub use essenty_back_handler::{BackDispatcher, BackError, BackEvent, BackHandle, BackPhase};
+pub use essenty_back_handler::{
+    BackDispatcher, BackError, BackEvent, BackHandle, BackPhase, GesturePosition, SwipeEdge,
+};
 pub use essenty_instance_keeper::{InstanceKeeper, InstanceKeeperError};
 pub use essenty_lifecycle::{LifecycleError, LifecycleRegistry, LifecycleState, Subscription};
 pub use essenty_state_keeper::{StateKeeper, StateKeeperError};

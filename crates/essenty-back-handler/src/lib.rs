@@ -40,7 +40,7 @@ mod event;
 
 pub use dispatcher::{BackCommands, BackDispatcher, BackHandle};
 pub use error::BackError;
-pub use event::{BackEvent, BackPhase};
+pub use event::{BackEvent, BackPhase, GesturePosition, SwipeEdge};
 
 #[cfg(test)]
 mod tests;

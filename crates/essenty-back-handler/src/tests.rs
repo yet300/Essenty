@@ -112,6 +112,26 @@ fn predictive_gesture_lifecycle() {
 }
 
 #[test]
+fn predictive_gesture_preserves_edge_and_touch_coordinates() {
+    let mut dispatcher = BackDispatcher::new();
+    let events = Rc::new(RefCell::new(Vec::new()));
+    let probe = Rc::clone(&events);
+    dispatcher.register(0, true, move |event| probe.borrow_mut().push(event));
+
+    let start = GesturePosition { swipe_edge: SwipeEdge::Left, touch_x: 12.5, touch_y: 24.0 };
+    let progress = GesturePosition { swipe_edge: SwipeEdge::Right, touch_x: 28.0, touch_y: 40.5 };
+    assert!(dispatcher.predictive_start_with(start));
+    assert!(dispatcher.predictive_progress_with(0.6, progress).unwrap());
+    assert!(dispatcher.predictive_cancel().unwrap());
+
+    let events = events.borrow();
+    assert_eq!(events[0].position, Some(start));
+    assert_eq!(events[1].position, Some(progress));
+    assert_eq!(events[1].progress, Some(0.6));
+    assert_eq!(events[2].position, None);
+}
+
+#[test]
 fn predictive_invoke_completes_gesture() {
     let mut dispatcher = BackDispatcher::new();
     let log = Rc::new(RefCell::new(Vec::new()));

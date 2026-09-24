@@ -1,4 +1,4 @@
-use essenty_back_handler::BackDispatcher;
+use essenty_back_handler::{BackDispatcher, GesturePosition};
 
 /// Forwards `OnBackPressedDispatcher` / Predictive Back events into a core
 /// [`BackDispatcher`].
@@ -40,6 +40,11 @@ impl AndroidBackBridge {
         self.dispatcher.predictive_start()
     }
 
+    /// Forwards predictive start with edge and touch coordinates.
+    pub fn handle_gesture_start_with(&mut self, position: GesturePosition) -> bool {
+        self.dispatcher.predictive_start_with(position)
+    }
+
     /// Predictive Back `onBackProgressed` equivalent.
     ///
     /// # Errors
@@ -51,6 +56,20 @@ impl AndroidBackBridge {
         progress: f32,
     ) -> Result<bool, essenty_back_handler::BackError> {
         self.dispatcher.predictive_progress(progress)
+    }
+
+    /// Forwards predictive progress with edge and touch coordinates.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`BackError::NoGestureInProgress`](essenty_back_handler::BackError)
+    /// when no gesture is in flight.
+    pub fn handle_gesture_progress_with(
+        &mut self,
+        progress: f32,
+        position: GesturePosition,
+    ) -> Result<bool, essenty_back_handler::BackError> {
+        self.dispatcher.predictive_progress_with(progress, position)
     }
 
     /// Predictive Back `onBackCancelled` equivalent.

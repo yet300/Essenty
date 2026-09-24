@@ -1,4 +1,4 @@
-use crate::{BackError, BackEvent};
+use crate::{BackError, BackEvent, GesturePosition};
 use std::collections::BTreeMap;
 
 /// Registration token returned by [`BackDispatcher::register`].
@@ -193,6 +193,15 @@ impl BackDispatcher {
     /// Starts a predictive gesture, claiming the current winner.
     /// Returns `true` when a handler consumed the start.
     pub fn predictive_start(&mut self) -> bool {
+        self.start_gesture(BackEvent::started())
+    }
+
+    /// Starts a predictive gesture with edge and touch coordinates.
+    pub fn predictive_start_with(&mut self, position: GesturePosition) -> bool {
+        self.start_gesture(BackEvent::started_with(position))
+    }
+
+    fn start_gesture(&mut self, event: BackEvent) -> bool {
         let Some(id) = self.winner() else {
             self.active_gesture = None;
             self.gesture_in_flight = false;
@@ -200,7 +209,7 @@ impl BackDispatcher {
         };
         self.gesture_in_flight = true;
         self.active_gesture = Some(id);
-        self.dispatch_to(id, BackEvent::started(), true)
+        self.dispatch_to(id, event, true)
     }
 
     /// Delivers progress to the gesture owner.
@@ -210,6 +219,23 @@ impl BackDispatcher {
     /// Returns [`BackError::NoGestureInProgress`] when no gesture is in
     /// flight.
     pub fn predictive_progress(&mut self, progress: f32) -> Result<bool, BackError> {
+        self.progress_gesture(BackEvent::progressed(progress))
+    }
+
+    /// Delivers progress with edge and touch coordinates.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`BackError::NoGestureInProgress`] when no gesture is in flight.
+    pub fn predictive_progress_with(
+        &mut self,
+        progress: f32,
+        position: GesturePosition,
+    ) -> Result<bool, BackError> {
+        self.progress_gesture(BackEvent::progressed_with(progress, position))
+    }
+
+    fn progress_gesture(&mut self, event: BackEvent) -> Result<bool, BackError> {
         if !self.gesture_in_flight {
             return Err(BackError::NoGestureInProgress);
         }
@@ -219,9 +245,7 @@ impl BackDispatcher {
                 self.dispatch_to(id, BackEvent::started(), true);
             }
         }
-        Ok(self
-            .active_gesture
-            .is_some_and(|id| self.dispatch_to(id, BackEvent::progressed(progress), true)))
+        Ok(self.active_gesture.is_some_and(|id| self.dispatch_to(id, event, true)))
     }
 
     /// Cancels the in-flight gesture, delivering `Cancelled` to its owner.
