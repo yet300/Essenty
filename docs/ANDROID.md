@@ -34,8 +34,12 @@ the core. The API 34+ mapping preserves progress, edge, and touch coordinates.
 Registration and unregistration are posted through
 `AndroidApp::run_on_java_main_thread`. A setup or teardown error can be read
 with `take_error`. The adapter owns the proxy and dispatcher global reference;
-unregister runs before those references are released. Its JNI callback catches
-Rust panics and clears a pending Java exception after callback failures.
+unregister runs before those references are released. Dropping during an owned
+gesture defers unregister until the terminal platform callback. If Java rejects
+unregister, the adapter keeps the proxy alive and retries on a later Android
+host attach; that exceptional fallback can retain the old dispatcher until the
+process exits if no later host appears. Its JNI callback catches Rust panics and
+clears a pending Java exception after callback failures.
 
 ```toml
 [dependencies]
