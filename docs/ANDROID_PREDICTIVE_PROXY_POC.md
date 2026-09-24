@@ -6,7 +6,7 @@ Decision: RUST DYNAMIC PROXY BACKEND VIABLE
 
 ## What was built
 
-The independent [example](../examples/android-predictive-proxy-poc/) is a Rust `cdylib` packaged with `cargo-apk2`. Its manifest declares `android.app.NativeActivity`, `android:enableOnBackInvokedCallback="true"`, and no consumer Java, Kotlin, AndroidX, or Gradle project. `cargo-apk2` built and signed an APK containing the Rust library and its normal NativeActivity `classes.dex`. `jni-min-helper` privately embeds an `InvocHdl` invocation-handler DEX in the Rust library and loads it with `InMemoryDexClassLoader`. The generated Java `Proxy` implements `android.window.OnBackAnimationCallback` on API 34+, which also extends `OnBackInvokedCallback`; API 33 selects `OnBackInvokedCallback` directly. Below API 33 the example uses the native key route.
+The archived [experiment](../experiments/android-predictive-proxy-poc/) is a Rust `cdylib` packaged with `cargo-apk2`. Its manifest declares `android.app.NativeActivity`, `android:enableOnBackInvokedCallback="true"`, and no consumer Java, Kotlin, AndroidX, or Gradle project. `cargo-apk2` built and signed an APK containing the Rust library and its normal NativeActivity `classes.dex`. `jni-min-helper` privately embeds an `InvocHdl` invocation-handler DEX in the Rust library and loads it with `InMemoryDexClassLoader`. The generated Java `Proxy` implements `android.window.OnBackAnimationCallback` on API 34+, which also extends `OnBackInvokedCallback`; API 33 selects `OnBackInvokedCallback` directly. Below API 33 the experiment uses the native key route.
 
 This matters because `java.lang.reflect.Proxy` alone still needs a JVM `InvocationHandler`. `jni-min-helper` supplies one internally; no consumer JVM work is required. The private DEX is an implementation detail of the crate, not a consumer source file.
 
@@ -34,7 +34,7 @@ The proof did **not** measure global-reference counts under repeated Activity re
 
 ## Reproduce
 
-From `examples/android-predictive-proxy-poc`, with Android SDK/NDK configured:
+From `experiments/android-predictive-proxy-poc`, with Android SDK/NDK configured:
 
 ```sh
 cargo apk2 build
@@ -50,8 +50,11 @@ adb logcat -d -s EssentyProxyPOC:I AndroidRuntime:E
 The example uses `S` for the numeric-field probe and Space for teardown. Use a live edge gesture to test platform-supplied variable progress.
 Build with `cargo apk2 build --features invoke-only` to exercise the API 33 interface on an API 34+ device.
 
-## AndroidX removal scope for the next task
+## Historical AndroidX experiment
 
-The AndroidX experiment is commit `6da0a0f` (`build(android): verify AndroidX packaging boundary`). Its self-contained packaging files are the **entire** `android/androidx-bridge/` directory, including the Gradle builds, Java availability probe, test app, and `verify-packaging.sh`. `docs/ANDROIDX_INTEGRATION.md` documents that experiment. Commit `6da0a0f` also changed `README.md`, `docs/ANDROID.md`, `docs/SEMANTIC_COMPATIBILITY.md`, and `docs/TARGETS.md`; only the AndroidX-specific paragraphs in those files should be edited after production integration. Do **not** revert commit `efcbb1f`, which added the Rust swipe-edge and touch-position data needed here. No AndroidX files or branch were removed in this proof.
+Commit `6da0a0f` added an AndroidX packaging experiment. Its Gradle/JVM proof
+artifacts were removed during the NativeActivity migration. Commit `efcbb1f`'s
+Rust swipe-edge and touch-position semantics remain in the core. The old local
+branch pointer is retained until the migration's completion review.
 
 Platform/API references: [OnBackInvokedDispatcher](https://developer.android.com/reference/android/window/OnBackInvokedDispatcher), [OnBackAnimationCallback](https://developer.android.com/reference/android/window/OnBackAnimationCallback), [BackEvent](https://developer.android.com/reference/android/window/BackEvent), [predictive-back opt-in](https://developer.android.com/guide/navigation/custom-back/predictive-back-gesture), [android-activity](https://docs.rs/android-activity/0.6.1/android_activity/), and [jni-min-helper DynamicProxy](https://docs.rs/jni-min-helper/0.4.7/jni_min_helper/struct.DynamicProxy.html).
