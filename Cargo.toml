@@ -3,6 +3,7 @@ resolver = "3"
 members = [
     "crates/essenty",
     "crates/essenty-lifecycle",
+    "crates/essenty-lifecycle-tokio",
     "crates/essenty-state-keeper",
     "crates/essenty-instance-keeper",
     "crates/essenty-back-handler",
@@ -13,6 +14,7 @@ members = [
 default-members = [
     "crates/essenty",
     "crates/essenty-lifecycle",
+    "crates/essenty-lifecycle-tokio",
     "crates/essenty-state-keeper",
     "crates/essenty-instance-keeper",
     "crates/essenty-back-handler",
